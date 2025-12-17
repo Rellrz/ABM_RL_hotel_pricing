@@ -117,7 +117,7 @@ class HotelAgentConfig:
     discount_factor: float = 0.95  # γ: 折扣因子（用于时间折扣奖励分配）
     epsilon_start: float = 0.9  # 初始探索率
     epsilon_end: float = 0.1  # 最终探索率
-    epsilon_decay_episodes: int = 500  # 探索率衰减轮数
+    epsilon_decay_episodes: int = 300  # 探索率衰减轮数
     
     # UCB 探索参数
     ucb_c: float = 2.0  # UCB 探索系数
