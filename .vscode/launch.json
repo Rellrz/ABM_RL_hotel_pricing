@@ -1,0 +1,118 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "训练: 快速测试 (10轮×30天)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/train.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--episodes", "10",
+                "--length", "30"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "训练: 中等规模 (50轮×180天)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/train.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--episodes", "50",
+                "--length", "180"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "训练: 完整训练 (100轮×365天)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/train.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--episodes", "100",
+                "--length", "365"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "训练: 重新预处理+快速测试",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/train.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--preprocess",
+                "--episodes", "10",
+                "--length", "30"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "训练: 加载模型继续训练",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/train.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--load",
+                "--episodes", "50",
+                "--length", "365"
+            ],
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "测试: 系统测试",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/test_system.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "数据预处理",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/data/preprocessing.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        }
+    ]
+}

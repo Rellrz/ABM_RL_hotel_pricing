@@ -1,0 +1,27 @@
+# ABM-RL酒店动态定价系统依赖包
+# 安装命令: pip install -r requirements_abm.txt
+
+# ABM核心框架
+mesa>=2.1.0
+
+# 数值计算和数据处理
+numpy>=1.20.0
+pandas>=1.3.0
+scipy>=1.7.0
+
+# 机器学习（保留原有NGBoost支持）
+scikit-learn>=0.24.0
+ngboost>=0.3.0
+
+# 可视化
+matplotlib>=3.4.0
+seaborn>=0.11.0
+
+# 进度条
+tqdm>=4.62.0
+
+# 超参数优化（可选）
+optuna>=2.10.0
+
+# 其他工具
+joblib>=1.0.0
