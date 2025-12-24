@@ -14,6 +14,7 @@ from scipy import stats
 # 本地模块导入
 from configs.config import RL_CONFIG
 from src.utils.training_monitor import get_training_monitor
+from src.algorithms.q_learning import QLearning
 
 class HotelAgent:
     """
@@ -79,17 +80,32 @@ class HotelAgent:
         self.epsilon_end = epsilon_end
         self.epsilon_decay_steps = epsilon_decay_steps
         
-        # Q表
-        self.q_table = defaultdict(lambda: np.zeros(n_actions))
-        
-        # 状态访问计数
-        self.state_visit_count = defaultdict(int)
-        
-        # 状态-动作访问计数（用于UCB探索）
-        self.state_action_visit_count = defaultdict(int)
+        # 初始化Q-learning算法
+        self.q_learning = QLearning(
+            n_states=n_states,
+            n_actions=n_actions,
+            learning_rate=learning_rate,
+            discount_factor=discount_factor
+        )
         
         # 训练历史
         self.training_history = []
+    
+    # 向后兼容的属性访问
+    @property
+    def q_table(self):
+        """Q表（委托给Q-learning算法）"""
+        return self.q_learning.q_table
+    
+    @property
+    def state_visit_count(self):
+        """状态访问计数（委托给Q-learning算法）"""
+        return self.q_learning.state_visit_count
+    
+    @property
+    def state_action_visit_count(self):
+        """状态-动作访问计数（委托给Q-learning算法）"""
+        return self.q_learning.state_action_visit_count
     
     def get_epsilon(self, episode: int) -> float:
         """获取当前的epsilon值 - 使用更快的指数衰减策略"""
@@ -118,12 +134,12 @@ class HotelAgent:
         """选择动作（epsilon-greedy + 增强UCB探索策略）"""
         epsilon = self.get_epsilon(episode) # 获取当前探索系数，用于epsilon-greedy策略
         state_key = tuple(state) if isinstance(state, (list, np.ndarray)) else state
-        q_values = self.q_table[state_key]
+        q_values = self.q_learning.get_q_values(state)
         
         # 36个动作组合：action_idx = online_idx * 6 + offline_idx
         if random.random() < epsilon:
             # 增强探索策略：结合UCB和随机探索
-            visit_counts = np.array([self.state_action_visit_count.get((state_key, a), 0) for a in range(self.n_actions)])
+            visit_counts = np.array([self.q_learning.state_action_visit_count.get((state_key, a), 0) for a in range(self.n_actions)])
             
             # 如果存在完全未探索的动作（访问次数为0），优先选择这些动作
             unvisited_actions = np.where(visit_counts == 0)[0]
@@ -150,124 +166,25 @@ class HotelAgent:
             
             if len(best_actions) > 1:
                 # 在最佳动作中选择访问次数最少的
-                visit_counts = np.array([self.state_action_visit_count.get((state_key, a), 0) for a in best_actions])
+                visit_counts = np.array([self.q_learning.state_action_visit_count.get((state_key, a), 0) for a in best_actions])
                 least_visited_idx = np.argmin(visit_counts)
                 return best_actions[least_visited_idx]
             else:
                 return best_actions[0]
     
     def update_q_table(self, state: Union[List, np.ndarray, int], action: int, reward: float, next_state: Union[List, np.ndarray, int], done: bool) -> float:
-        """更新Q表"""
-        state_key = tuple(state) if isinstance(state, (list, np.ndarray)) else state
-        next_state_key = tuple(next_state) if isinstance(next_state, (list, np.ndarray)) else next_state
-        
-        # 更新访问计数
-        self.state_visit_count[state_key] += 1
-        self.state_action_visit_count[(state_key, action)] += 1
-        
-        # 当前Q值
-        current_q = self.q_table[state_key][action]
-        
-        # 下一个状态的最大Q值
-        if done:
-            max_next_q = 0
-        else:
-            max_next_q = np.max(self.q_table[next_state_key])
-        
-        # Q-learning更新公式
-        new_q = current_q + self.learning_rate * (reward + self.discount_factor * max_next_q - current_q)
-        
-        # 更新Q表
-        self.q_table[state_key][action] = new_q
-        
+        """更新Q表（委托给Q-learning算法）"""
+        # 委托给Q-learning算法进行更新
+        new_q = self.q_learning.update(state, action, reward, next_state, done)
         return new_q
     
     def get_policy(self) -> Dict[Any, int]:
-        """
-        获取当前策略（状态到动作的映射）
-        
-        功能描述：
-        基于当前Q表生成确定性策略，为每个状态选择具有最高Q值的动作。
-        
-        返回值:
-            Dict[Any, int]: 策略字典，键为状态，值为最优动作索引
-            
-        策略生成逻辑:
-        - 遍历Q表中的所有状态
-        - 对每个状态的Q值数组使用argmax获取最优动作
-        - 返回状态到最优动作的映射字典
-        
-        Note:
-        - 返回确定性策略（贪婪策略）
-        - 如果Q表为空，返回空字典
-        - 动作为0-7的整数，对应8个定价档位
-        """
-        policy = {}
-        for state, q_values in self.q_table.items():
-            policy[state] = np.argmax(q_values)
-        return policy
+        """获取当前策略（委托给Q-learning算法）"""
+        return self.q_learning.get_policy()
     
     def get_q_value_stats(self) -> Dict[str, float]:
-        """
-        获取Q值统计信息和学习进度指标
-        
-        功能描述：
-        计算Q表的详细统计信息，包括Q值分布、探索覆盖率、学习进度等关键指标。
-        
-        返回值:
-            Dict[str, float]: 统计信息字典，包含以下字段：
-                - mean_q_value: Q值的平均值
-                - std_q_value: Q值的标准差  
-                - min_q_value: Q值的最小值
-                - max_q_value: Q值的最大值
-                - num_states: 已访问的状态数量
-                - num_state_visits: 总状态访问次数
-                - zero_q_percentage: 零值Q值所占百分比
-                - exploration_coverage: 探索覆盖率（百分比）
-                - explored_state_actions: 已探索的状态-动作对数量
-                - total_state_actions: 总状态-动作对数量
-                
-        计算逻辑:
-        1. 收集所有Q值并计算基本统计量（均值、标准差、极值）
-        2. 统计零值Q值的数量和比例
-        3. 计算探索覆盖率：已探索的状态-动作对 / 总状态-动作对
-        4. 汇总状态访问和状态-动作访问计数
-        
-        Note:
-        - 如果Q表为空，返回空字典
-        - 探索覆盖率反映学习的完整性
-        - 零值Q值比例可指示未充分探索的区域
-        - 状态访问计数帮助分析学习重点
-        """
-        if not self.q_table:
-            return {}
-        
-        all_q_values = []
-        zero_q_count = 0
-        total_q_entries = 0
-        
-        for q_values in self.q_table.values():
-            all_q_values.extend(q_values)
-            zero_q_count += np.sum(q_values == 0)
-            total_q_entries += len(q_values)
-        
-        # 计算探索覆盖率
-        explored_state_actions = sum(1 for count in self.state_action_visit_count.values() if count > 0)
-        total_state_actions = len(self.q_table) * self.n_actions
-        exploration_coverage = explored_state_actions / total_state_actions if total_state_actions > 0 else 0
-        
-        return {
-            'mean_q_value': np.mean(all_q_values),
-            'std_q_value': np.std(all_q_values),
-            'min_q_value': np.min(all_q_values),
-            'max_q_value': np.max(all_q_values),
-            'num_states': len(self.q_table),
-            'num_state_visits': sum(self.state_visit_count.values()),
-            'zero_q_percentage': (zero_q_count / total_q_entries) * 100 if total_q_entries > 0 else 0,
-            'exploration_coverage': exploration_coverage * 100,
-            'explored_state_actions': explored_state_actions,
-            'total_state_actions': total_state_actions
-        }
+        """获取Q值统计信息（委托给Q-learning算法）"""
+        return self.q_learning.get_statistics()
     
     def save_agent(self, filepath: str) -> None:
         """

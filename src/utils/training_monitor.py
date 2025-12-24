@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from configs.config import PATH_CONFIG
 
 class TrainingMonitor:
     """
@@ -55,7 +56,7 @@ class TrainingMonitor:
         start_time (datetime): 训练开始时间
     """
     
-    def __init__(self, save_dir: str = '../05_分析报告'):
+    def __init__(self):
         """
         初始化训练监控器
         
@@ -70,8 +71,7 @@ class TrainingMonitor:
             - 记录训练开始时间
             - 支持多种指标类型的并行记录
         """
-        self.save_dir = save_dir
-        os.makedirs(save_dir, exist_ok=True)
+        self.save_dir = PATH_CONFIG.figures_dir
         
         # 训练指标存储
         self.bnn_train_losses = []  # NGBoost训练损失

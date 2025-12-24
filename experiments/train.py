@@ -64,8 +64,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='酒店动态定价系统')
     parser.add_argument('--data', type=str, default='datasets/hotel_bookings.csv',
                        help='酒店预订数据文件路径')
-    parser.add_argument('--abm-episodes', type=int, default=10,
-                       help='ABM模式下的训练轮数（默认20）')
+    parser.add_argument('--abm-episodes', type=int, default=200,
+                       help='ABM模式下的训练轮数（默认200）')
     parser.add_argument('--run-uuid', type=str, default=None,
                        help='运行UUID，用于Q表存储和识别')
     # parser.add_argument('--simulate-days', type=int, default=90,

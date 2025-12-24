@@ -7,6 +7,7 @@ from typing import List, Dict, Tuple, Optional
 import pandas as pd
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_PATH = os.path.join(PROJECT_ROOT, 'datasets', 'hotel_bookings.csv')
 
 @dataclass
 class PathConfig:
@@ -123,17 +124,19 @@ def fit_wtp_distribution(historical_data: pd.DataFrame) -> Dict[str, float]:
     return {'mean': float(adr_values.mean()), 'std': float(adr_values.std())}
 
 
-def create_abm_config(historical_data: Optional[pd.DataFrame] = None) -> 'ABMConfig':
+def create_abm_config(data_path:str = None) -> 'ABMConfig':
     """
     创建ABM配置（工厂函数）
     
     Args:
-        historical_data: 历史数据，如果提供则从数据计算参数
+        data_path: 历史数据文件路径，如果提供则从数据计算参数
         
     Returns:
         ABMConfig实例
     """
-    if historical_data is not None:
+    if data_path is not None:
+        historical_data = pd.read_csv(data_path)
+        historical_data = historical_data[historical_data['hotel'] == 'City Hotel'].copy()
         monthly_arrival_rates = calculate_monthly_arrival_rates(historical_data)
         lead_time_params = fit_lead_time_distribution(historical_data)
         wtp_params = fit_wtp_distribution(historical_data)
@@ -267,7 +270,7 @@ class LogConfig:
 
 
 PATH_CONFIG = PathConfig()
-ABM_CONFIG = create_abm_config()
+ABM_CONFIG = create_abm_config(DATA_PATH)
 RL_CONFIG = RLConfig()
 ENV_CONFIG = EnvConfig()
 SIMULATION_CONFIG = SimulationConfig()
