@@ -69,31 +69,24 @@ class HotelEnvironment:
         - 支持90天周期模拟，支持自定义起始日期
     """
     
-    def __init__(self, initial_inventory: int = None, max_stay_nights: int = 5, 
-                 cost_per_room: int = 20, beta_distribution: Optional[List[float]] = None,
-                 use_abm: bool = False, historical_data: Optional[Any] = None,
+    def __init__(self, initial_inventory: int = None, cost_per_room: int = 20, historical_data: Optional[Any] = None,
                  booking_window_days: int = 5):
         
         # 从配置文件读取客房数量，如果没有显式传递参数
         if initial_inventory is None:
-            from config import ENV_CONFIG
-            self.initial_inventory = ENV_CONFIG['initial_inventory']
+            from configs.config import ENV_CONFIG
+            self.initial_inventory = ENV_CONFIG.initial_inventory
         else:
             self.initial_inventory = initial_inventory
-        self.max_stay_nights = max_stay_nights # 最大入住天数
         self.cost_per_room = cost_per_room # 每间客房的成本
-        self.beta_distribution = beta_distribution or [0.2] * max_stay_nights # Beta分布参数，用于模拟未来需求
         
         # ✅ 预订窗口：客户只能预订未来N天（包括今天）
         self.booking_window_days = booking_window_days  # 默认5天
         
         # ABM模式配置
-        self.use_abm = use_abm
-        self.abm_model = None
         self.abm_model = HotelABMModel(
             historical_data=historical_data,
-            random_seed=42,
-            params=ABM_CONFIG
+            random_seed=42
             )
         
         # ✅ 初始化未来库存数组：使用booking_window_days作为窗口大小
@@ -152,8 +145,7 @@ class HotelEnvironment:
         self.current_price_window_offline = [120.0] * self.booking_window_days
         
         # 重置ABM模型
-        if self.use_abm and self.abm_model is not None:
-            self.abm_model.reset()
+        self.abm_model.reset()
         
         return self._get_state()
     
@@ -372,48 +364,47 @@ class HotelEnvironment:
         online_prices = ENV_CONFIG.online_price_levels  # 线上价格档位（6个动作）
         offline_prices = ENV_CONFIG.offline_price_levels  # 线下价格档位（6个动作）
         
-        # ✅ ABM模式：使用客户行为模型（需要5天的价格窗口）
-        if self.use_abm:
-            # action应该是一个包含5个动作的列表：[action_day0, action_day1, ..., action_day4]
-            if isinstance(action, (list, np.ndarray)) and len(action) == 5:
-                # 5个动作：分别对应5天
-                actions_window = action
-                price_windows_online = []
-                price_windows_offline = []
-                for act in actions_window:
-                    act_idx = int(act.item()) if hasattr(act, 'item') else int(act)
-                    online_idx = act_idx // 6
-                    offline_idx = act_idx % 6
-                    price_windows_online.append(online_prices[online_idx])
-                    price_windows_offline.append(offline_prices[offline_idx])
-            elif isinstance(action, (int, np.integer)) or (hasattr(action, 'item') and not isinstance(action, (list, np.ndarray))):
-                # 单个动作：应用到今天，其他天保持当前价格窗口
-                action_idx = int(action.item()) if hasattr(action, 'item') else int(action)
-                online_idx = action_idx // 6
-                offline_idx = action_idx % 6
-                price_online = online_prices[online_idx]
-                price_offline = offline_prices[offline_idx]
-                price_windows_online = [price_online] + self.current_price_window_online[1:]
-                price_windows_offline = [price_offline] + self.current_price_window_offline[1:]
-            else:
-                raise ValueError(f"ABM模式需要1个或5个动作，收到: {action}, 类型: {type(action)}")
+        # ✅ ABM模式：使用客户行为模型（需要5天的价格窗口）一个包含5个动作的列表：[action_day0, action_day1, ..., action_day4]
+        if isinstance(action, (list, np.ndarray)) and len(action) == 5:
+            # 5个动作：分别对应5天
+            actions_window = action
+            price_windows_online = []
+            price_windows_offline = []
+            for act in actions_window:
+                act_idx = int(act.item()) if hasattr(act, 'item') else int(act)
+                online_idx = act_idx // 6
+                offline_idx = act_idx % 6
+                price_windows_online.append(online_prices[online_idx])
+                price_windows_offline.append(offline_prices[offline_idx])
+        elif isinstance(action, (int, np.integer)) or (hasattr(action, 'item') and not isinstance(action, (list, np.ndarray))):
+            # 单个动作：应用到今天，其他天保持当前价格窗口
+            action_idx = int(action.item()) if hasattr(action, 'item') else int(action)
+            online_idx = action_idx // 6
+            offline_idx = action_idx % 6
+            price_online = online_prices[online_idx]
+            price_offline = offline_prices[offline_idx]
+            price_windows_online = [price_online] + self.current_price_window_online[1:]
+            price_windows_offline = [price_offline] + self.current_price_window_offline[1:]
+        else:
+            raise ValueError(f"ABM模式需要1个或5个动作，收到: {action}, 类型: {type(action)}")
             
-            actual_bookings, total_revenue = self._step_with_abm(price_windows_online, price_windows_offline)
+        actual_bookings, total_revenue = self._step_with_abm(price_windows_online, price_windows_offline)
             
-            # 更新库存
-            self._update_inventory(actual_bookings)
+        # 更新库存
+            # action应该是
+        self._update_inventory(actual_bookings)
             
-            # 更新统计
-            self.total_revenue += total_revenue
-            self.total_bookings += actual_bookings
-            self.day += 1
+        # 更新统计
+        self.total_revenue += total_revenue
+        self.total_bookings += actual_bookings
+        self.day += 1
             
-            # 记录历史（使用今天的价格）
-            price = price_windows_online[0]  # 今天的线上价格
-            price_online = price_windows_online[0]
-            price_offline = price_windows_offline[0]
+        # 记录历史（使用今天的价格）
+        price = price_windows_online[0]  # 今天的线上价格
+        price_online = price_windows_online[0]
+        price_offline = price_windows_offline[0]
             
-            self.daily_history.append({
+        self.daily_history.append({
                 'day': self.day,
                 'price': price,
                 'price_online': price_online,
@@ -426,17 +417,17 @@ class HotelEnvironment:
                 'reward': total_revenue
             })
             
-            # 获取新状态
-            new_state = self._get_state()
-            done = (self.day >= 365)
+        # 获取新状态
+        new_state = self._get_state()
+        done = (self.day >= 365)
             
-            info = {
+        info = {
                 'actual_bookings': actual_bookings,
                 'revenue': total_revenue,
                 'inventory_after': self.current_inventory
             }
             
-            return new_state, total_revenue, done, info
+        return new_state, total_revenue, done, info
     
     def _update_inventory(self, bookings: int) -> None:
         """
@@ -461,7 +452,7 @@ class HotelEnvironment:
         """
         if self.future_inventory:
             # ✅ 从ABM同步回最新的库存状态
-            daily_inv = self.abm_model.daily_available_rooms if (self.use_abm and self.abm_model) else None
+            daily_inv = self.abm_model.daily_available_rooms
             if daily_inv:
                 # 同步当前窗口的库存（已经被ABM更新过）
                 for i in range(len(self.future_inventory)):

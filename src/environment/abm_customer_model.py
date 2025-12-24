@@ -220,7 +220,6 @@ class HotelABMModel(Model):
     
     def __init__(self, 
                  historical_data: pd.DataFrame,
-                 params: Optional[Dict] = None,
                  random_seed: Optional[int] = None):
         """
         初始化ABM模型

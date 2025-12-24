@@ -42,20 +42,11 @@ def train_rl_system_with_abm(historical_data: pd.DataFrame, episodes: int = 100)
     # ✅ 创建集成ABM的RL环境
     env = HotelEnvironment(
         initial_inventory=ENV_CONFIG.initial_inventory,
-        use_abm=True,  # 启用ABM模式
         historical_data=historical_data  # 传入历史数据给ABM
     )
     
     # 根据参数选择智能体类型
-    agent = HotelAgent(
-            n_states=RL_CONFIG.n_states,  # 3个库存等级 × 3个季节 × 2个日期类型 = 18个状态
-            n_actions=RL_CONFIG.n_actions,
-            learning_rate=RL_CONFIG.learning_rate,
-            discount_factor=RL_CONFIG.discount_factor,
-            epsilon_start=RL_CONFIG.epsilon_start,
-            epsilon_end=RL_CONFIG.epsilon_end,
-            epsilon_decay_steps=RL_CONFIG.epsilon_decay_episodes
-        )
+    agent = HotelAgent()
     
     # 训练记录
     episode_rewards = []

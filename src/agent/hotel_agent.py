@@ -65,27 +65,22 @@ class HotelAgent:
         - 状态离散化支持库存、季节、工作日类型组合
     """
     
-    def __init__(self, n_states: int = 30, n_actions: int = None, learning_rate: float = 0.1, discount_factor: float = 0.9,
-                 epsilon_start: float = 0.8, epsilon_end: float = 0.01, epsilon_decay_steps: int = 50):
+    def __init__(self):
         
-        # 如果未指定动作数，从配置文件读取
-        if n_actions is None:
-            n_actions = RL_CONFIG['n_actions']  # 36个动作组合（线上6价格 × 线下6价格）
-        
-        self.n_states = n_states
-        self.n_actions = n_actions  # 6×6=36个动作组合（线上6价格 × 线下6价格）
-        self.learning_rate = learning_rate
-        self.discount_factor = discount_factor
-        self.epsilon_start = epsilon_start
-        self.epsilon_end = epsilon_end
-        self.epsilon_decay_steps = epsilon_decay_steps
+        self.n_states = RL_CONFIG.n_states
+        self.n_actions = RL_CONFIG.n_actions
+        self.learning_rate = RL_CONFIG.learning_rate
+        self.discount_factor = RL_CONFIG.discount_factor
+        self.epsilon_start = RL_CONFIG.epsilon_start
+        self.epsilon_end = RL_CONFIG.epsilon_end
+        self.epsilon_decay_steps = RL_CONFIG.epsilon_decay_episodes
         
         # 初始化Q-learning算法
         self.q_learning = QLearning(
-            n_states=n_states,
-            n_actions=n_actions,
-            learning_rate=learning_rate,
-            discount_factor=discount_factor
+            n_states=self.n_states,
+            n_actions=self.n_actions,
+            learning_rate=self.learning_rate,
+            discount_factor=self.discount_factor
         )
         
         # 训练历史
