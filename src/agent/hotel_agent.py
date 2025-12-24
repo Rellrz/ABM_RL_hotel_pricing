@@ -15,73 +15,75 @@ from scipy import stats
 from configs.config import RL_CONFIG
 from src.utils.training_monitor import get_training_monitor
 from src.algorithms.q_learning import QLearning
+from src.algorithms.actor_critic import TabularActorCritic
 
 class HotelAgent:
     """
-    Q-learning智能体
+    酒店定价智能体（支持多算法）
     
-    实现Q-learning算法的智能体，用于酒店动态定价决策。
-    支持ε-贪心探索策略、UCB探索增强、状态访问统计等功能。
+    支持两种强化学习算法：
+    1. Q-learning: 离散动作空间（36个定价组合）
+    2. Actor-Critic: 连续动作空间（价格80-200元）
     
-    主要特性：
-    - ε-贪心探索：平衡探索和利用
-    - UCB增强：优先选择访问次数较少的状态-动作对
-    - 状态离散化：将连续状态映射到离散状态空间
-    - 访问统计：跟踪状态和动作访问次数
-    - Q值更新：使用TD学习更新Q值
+    算法切换：
+    - 通过配置文件中的 RL_CONFIG.algorithm 参数选择
+    - 'q_learning': 使用Q-learning算法
+    - 'actor_critic': 使用Actor-Critic算法
     
     状态空间：
     - 总状态数：30（库存等级5 × 季节3 × 日期类型2）
     - 状态编码：inventory_level × 6 + season × 2 + weekday
     
-    动作空间：
-    - 总动作数：36（线上6档 × 线下6档）
-    - 动作映射：action_idx = online_idx * 6 + offline_idx
-    - 线上价格档位：[80, 90, 100, 110, 120, 130]元
-    - 线下价格档位：[90, 105, 120, 135, 150, 165]元
-    
-    学习参数：
-    - 学习率：控制Q值更新速度
-    - 折扣因子：权衡即时奖励和未来奖励
-    - ε衰减：逐步减少探索概率
-    
     Attributes:
-        n_states (int): 状态数量（默认30）
-        n_actions (int): 动作数量（默认6）
-        learning_rate (float): 学习率
-        discount_factor (float): 折扣因子
-        epsilon_start (float): 初始探索概率
-        epsilon_end (float): 最终探索概率
-        epsilon_decay_steps (int): ε衰减步数
-        q_table (Dict): Q值表，键为状态，值为动作Q值数组
-        state_visit_count (Dict): 状态访问计数
-        state_action_visit_count (Dict): 状态-动作访问计数
-        training_history (List): 训练历史记录
-        
-    Note:
-        - 使用defaultdict自动初始化Q值和访问计数
-        - 支持UCB探索策略，优先探索访问次数少的状态-动作对
-        - ε值随训练episode线性衰减
-        - 状态离散化支持库存、季节、工作日类型组合
+        algorithm_type (str): 当前使用的算法类型
+        algorithm: 算法实例（QLearning 或 TabularActorCritic）
+        n_states (int): 状态数量
+        n_actions (int): 动作数量（Q-learning使用）
     """
     
     def __init__(self):
+        """初始化智能体，根据配置选择算法"""
         
+        # 读取配置
+        self.algorithm_type = RL_CONFIG.algorithm
         self.n_states = RL_CONFIG.n_states
         self.n_actions = RL_CONFIG.n_actions
-        self.learning_rate = RL_CONFIG.learning_rate
         self.discount_factor = RL_CONFIG.discount_factor
-        self.epsilon_start = RL_CONFIG.epsilon_start
-        self.epsilon_end = RL_CONFIG.epsilon_end
-        self.epsilon_decay_steps = RL_CONFIG.epsilon_decay_episodes
         
-        # 初始化Q-learning算法
-        self.q_learning = QLearning(
-            n_states=self.n_states,
-            n_actions=self.n_actions,
-            learning_rate=self.learning_rate,
-            discount_factor=self.discount_factor
-        )
+        # 根据配置初始化算法
+        if self.algorithm_type == 'q_learning':
+            print(f"✅ 使用 Q-learning 算法（离散动作空间）")
+            self.learning_rate = RL_CONFIG.learning_rate
+            self.epsilon_start = RL_CONFIG.epsilon_start
+            self.epsilon_end = RL_CONFIG.epsilon_end
+            self.epsilon_decay_steps = RL_CONFIG.epsilon_decay_episodes
+            
+            self.algorithm = QLearning(
+                n_states=self.n_states,
+                n_actions=self.n_actions,
+                learning_rate=self.learning_rate,
+                discount_factor=self.discount_factor
+            )
+            
+        elif self.algorithm_type == 'actor_critic':
+            print(f"✅ 使用 Actor-Critic 算法（连续动作空间）")
+            self.algorithm = TabularActorCritic(
+                n_states=self.n_states,
+                action_min=RL_CONFIG.action_min,
+                action_max=RL_CONFIG.action_max,
+                actor_lr=RL_CONFIG.actor_lr,
+                critic_lr=RL_CONFIG.critic_lr,
+                discount_factor=self.discount_factor,
+                initial_std=RL_CONFIG.initial_std,
+                min_std=RL_CONFIG.min_std,
+                std_decay=RL_CONFIG.std_decay
+            )
+            # 为Actor-Critic设置兼容属性
+            self.epsilon_start = 0.0  # AC不使用epsilon
+            self.epsilon_end = 0.0
+            self.epsilon_decay_steps = 1
+        else:
+            raise ValueError(f"不支持的算法类型: {self.algorithm_type}")
         
         # 训练历史
         self.training_history = []
@@ -89,29 +91,40 @@ class HotelAgent:
     # 向后兼容的属性访问
     @property
     def q_table(self):
-        """Q表（委托给Q-learning算法）"""
-        return self.q_learning.q_table
+        """Q表（委托给算法）"""
+        if self.algorithm_type == 'q_learning':
+            return self.algorithm.q_table
+        else:
+            # Actor-Critic使用actor_table作为策略表
+            return self.algorithm.actor_table
     
     @property
     def state_visit_count(self):
-        """状态访问计数（委托给Q-learning算法）"""
-        return self.q_learning.state_visit_count
+        """状态访问计数（委托给算法）"""
+        return self.algorithm.state_visit_count
     
     @property
     def state_action_visit_count(self):
-        """状态-动作访问计数（委托给Q-learning算法）"""
-        return self.q_learning.state_action_visit_count
+        """状态-动作访问计数（委托给算法）"""
+        if self.algorithm_type == 'q_learning':
+            return self.algorithm.state_action_visit_count
+        else:
+            # Actor-Critic使用state_visit_count
+            return self.algorithm.state_visit_count
     
     def get_epsilon(self, episode: int) -> float:
-        """获取当前的epsilon值 - 使用更快的指数衰减策略"""
-        if episode >= self.epsilon_decay_steps:
-            return self.epsilon_end
+        """获取当前的epsilon值"""
+        if self.algorithm_type == 'actor_critic':
+            # Actor-Critic使用高斯噪声，返回当前标准差作为探索率
+            return self.algorithm.current_std / RL_CONFIG.initial_std  # 归一化到[0,1]
         else:
-            # 使用更快的指数衰减策略，使探索率快速下降
-            # epsilon = epsilon_end + (epsilon_start - epsilon_end) * exp(-episode / decay_rate)
-            decay_rate = self.epsilon_decay_steps / 2  # 进一步加快衰减速率
-            epsilon = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-episode / decay_rate)
-            return epsilon
+            # Q-learning使用epsilon-greedy
+            if episode >= self.epsilon_decay_steps:
+                return self.epsilon_end
+            else:
+                decay_rate = self.epsilon_decay_steps / 2
+                epsilon = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-episode / decay_rate)
+                return epsilon
     
     def discretize_state(self, state_info: Dict[str, Any], season: int, weekday: int) -> int:
         """离散化状态 - 基于当前库存、季节和日期类型"""
@@ -125,16 +138,27 @@ class HotelAgent:
         
         return min(state_index, self.n_states - 1)  # 防止越界
     
-    def select_action(self, state: Union[List, np.ndarray, int], episode: int) -> int:
-        """选择动作（epsilon-greedy + 增强UCB探索策略）"""
-        epsilon = self.get_epsilon(episode) # 获取当前探索系数，用于epsilon-greedy策略
+    def select_action(self, state: Union[List, np.ndarray, int], episode: int) -> Union[int, float]:
+        """
+        选择动作
+        
+        Returns:
+            int: Q-learning返回离散动作索引 (0-35)
+            float: Actor-Critic返回连续价格值 (80-200)
+        """
+        if self.algorithm_type == 'actor_critic':
+            # Actor-Critic: 直接从策略采样连续动作
+            return self.algorithm.select_action(state, deterministic=False)
+        
+        # Q-learning: epsilon-greedy + UCB探索
+        epsilon = self.get_epsilon(episode)
         state_key = tuple(state) if isinstance(state, (list, np.ndarray)) else state
-        q_values = self.q_learning.get_q_values(state)
+        q_values = self.algorithm.get_q_values(state)
         
         # 36个动作组合：action_idx = online_idx * 6 + offline_idx
         if random.random() < epsilon:
             # 增强探索策略：结合UCB和随机探索
-            visit_counts = np.array([self.q_learning.state_action_visit_count.get((state_key, a), 0) for a in range(self.n_actions)])
+            visit_counts = np.array([self.algorithm.state_action_visit_count.get((state_key, a), 0) for a in range(self.n_actions)])
             
             # 如果存在完全未探索的动作（访问次数为0），优先选择这些动作
             unvisited_actions = np.where(visit_counts == 0)[0]
@@ -161,25 +185,31 @@ class HotelAgent:
             
             if len(best_actions) > 1:
                 # 在最佳动作中选择访问次数最少的
-                visit_counts = np.array([self.q_learning.state_action_visit_count.get((state_key, a), 0) for a in best_actions])
+                visit_counts = np.array([self.algorithm.state_action_visit_count.get((state_key, a), 0) for a in best_actions])
                 least_visited_idx = np.argmin(visit_counts)
                 return best_actions[least_visited_idx]
             else:
                 return best_actions[0]
     
-    def update_q_table(self, state: Union[List, np.ndarray, int], action: int, reward: float, next_state: Union[List, np.ndarray, int], done: bool) -> float:
-        """更新Q表（委托给Q-learning算法）"""
-        # 委托给Q-learning算法进行更新
-        new_q = self.q_learning.update(state, action, reward, next_state, done)
-        return new_q
+    def update_q_table(self, state: Union[List, np.ndarray, int], action: Union[int, float], 
+                      reward: float, next_state: Union[List, np.ndarray, int], done: bool) -> float:
+        """更新算法参数"""
+        # 委托给具体算法进行更新
+        new_value = self.algorithm.update(state, action, reward, next_state, done)
+        return new_value
     
-    def get_policy(self) -> Dict[Any, int]:
-        """获取当前策略（委托给Q-learning算法）"""
-        return self.q_learning.get_policy()
+    def end_episode(self):
+        """结束episode，更新相关参数"""
+        if self.algorithm_type == 'actor_critic':
+            self.algorithm.end_episode()
+    
+    def get_policy(self) -> Dict[Any, Union[int, float]]:
+        """获取当前策略"""
+        return self.algorithm.get_policy()
     
     def get_q_value_stats(self) -> Dict[str, float]:
-        """获取Q值统计信息（委托给Q-learning算法）"""
-        return self.q_learning.get_statistics()
+        """获取算法统计信息"""
+        return self.algorithm.get_statistics()
     
     def save_agent(self, filepath: str) -> None:
         """

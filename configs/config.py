@@ -175,25 +175,39 @@ class ABMConfig:
 
 @dataclass
 class RLConfig:
-    """强化学习(Q-learning)配置
+    """强化学习配置
     
-    Q-learning算法参数，用于学习最优定价策略
+    支持两种算法：
+    1. Q-learning: 离散动作空间（36个定价组合）
+    2. Actor-Critic: 连续动作空间（价格范围80-200元）
+    
     状态空间: 库存档位 × 季节 × 日期类型 = 5 × 3 × 2 = 30种状态
-    动作空间: 36个定价组合（线上6档 × 线下6档）
-    线上价格档位: [80, 90, 100, 110, 120, 130]元
-    线下价格档位: [90, 105, 120, 135, 150, 165]元
     """
-    n_states: int = 18
-    n_actions: int = 36
+    # ========== 算法选择 ==========
+    algorithm: str = 'actor_critic'  # 'q_learning' 或 'actor_critic'
     
-    learning_rate: float = 0.05
+    # ========== 通用参数 ==========
+    n_states: int = 18
+    n_actions: int = 36  # Q-learning使用
     discount_factor: float = 0.99
+    
+    # ========== Q-learning参数 ==========
+    learning_rate: float = 0.05  # Q-learning学习率
     epsilon_start: float = 0.9
     epsilon_end: float = 0.01
     epsilon_decay_episodes: int = 100
     epsilon_min: float = 0.01
     
-    episodes: int = 320
+    # ========== Actor-Critic参数 ==========
+    actor_lr: float = 0.005  # Actor学习率（策略更新）- 降低以提高稳定性
+    critic_lr: float = 0.05  # Critic学习率（价值更新）
+    action_min: float = 80.0  # 最低价格
+    action_max: float = 200.0  # 最高价格
+    initial_std: float = 20.0  # 初始探索标准差
+    min_std: float = 0.5  # 最小探索标准差 - 极小值减少后期波动
+    std_decay: float = 0.99  # 标准差衰减率 - 持续衰减到500轮
+    
+    episodes: int = 500  # Actor-Critic需要更多轮次
     online_learning_days: int = 90
     update_frequency: int = 7
     

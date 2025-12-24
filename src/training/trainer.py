@@ -122,6 +122,10 @@ def train_rl_system_with_abm(historical_data: pd.DataFrame, episodes: int = 100)
         episode_revenues.append(total_revenue)
         episode_bookings.append(total_bookings)
         
+        # 结束episode（用于Actor-Critic的标准差衰减）
+        if hasattr(agent, 'end_episode'):
+            agent.end_episode()
+        
         # 记录到监控器
         current_epsilon = agent.get_epsilon(episode)
         q_stats = agent.get_q_value_stats() if hasattr(agent, 'get_q_value_stats') else None
@@ -158,10 +162,11 @@ def train_rl_system_with_abm(historical_data: pd.DataFrame, episodes: int = 100)
         pickle.dump(q_table_dict, f)
     print(f"\nQ表已保存: {q_table_path}")
         
+    # 保存agent参数（兼容Q-learning和Actor-Critic）
     agent_params = {
+            'algorithm_type': agent.algorithm_type,
             'n_states': agent.n_states,
             'n_actions': agent.n_actions,
-            'learning_rate': agent.learning_rate,
             'discount_factor': agent.discount_factor,
             'epsilon_start': agent.epsilon_start,
             'epsilon_end': agent.epsilon_end,
@@ -170,6 +175,16 @@ def train_rl_system_with_abm(historical_data: pd.DataFrame, episodes: int = 100)
             'state_visit_count': dict(agent.state_visit_count) if hasattr(agent, 'state_visit_count') else {},
             'state_action_visit_count': dict(agent.state_action_visit_count) if hasattr(agent, 'state_action_visit_count') else {}
         }
+    
+    # 添加算法特定参数
+    if agent.algorithm_type == 'q_learning':
+        agent_params['learning_rate'] = agent.learning_rate
+    elif agent.algorithm_type == 'actor_critic':
+        agent_params['actor_lr'] = agent.algorithm.actor_lr
+        agent_params['critic_lr'] = agent.algorithm.critic_lr
+        agent_params['action_min'] = agent.algorithm.action_min
+        agent_params['action_max'] = agent.algorithm.action_max
+        agent_params['current_std'] = agent.algorithm.current_std
     
     agent_path = PATH_CONFIG.hotel_agent_path
     with open(agent_path, 'wb') as f:

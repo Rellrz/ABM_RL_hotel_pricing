@@ -364,34 +364,55 @@ class HotelEnvironment:
         online_prices = ENV_CONFIG.online_price_levels  # 线上价格档位（6个动作）
         offline_prices = ENV_CONFIG.offline_price_levels  # 线下价格档位（6个动作）
         
-        # ✅ ABM模式：使用客户行为模型（需要5天的价格窗口）一个包含5个动作的列表：[action_day0, action_day1, ..., action_day4]
+        # ✅ 支持两种动作类型：
+        # 1. 离散动作（Q-learning）：动作索引 0-35
+        # 2. 连续动作（Actor-Critic）：直接价格值 80-200
+        
         if isinstance(action, (list, np.ndarray)) and len(action) == 5:
             # 5个动作：分别对应5天
             actions_window = action
             price_windows_online = []
             price_windows_offline = []
+            
             for act in actions_window:
-                act_idx = int(act.item()) if hasattr(act, 'item') else int(act)
-                online_idx = act_idx // 6
-                offline_idx = act_idx % 6
-                price_windows_online.append(online_prices[online_idx])
-                price_windows_offline.append(offline_prices[offline_idx])
-        elif isinstance(action, (int, np.integer)) or (hasattr(action, 'item') and not isinstance(action, (list, np.ndarray))):
-            # 单个动作：应用到今天，其他天保持当前价格窗口
-            action_idx = int(action.item()) if hasattr(action, 'item') else int(action)
-            online_idx = action_idx // 6
-            offline_idx = action_idx % 6
-            price_online = online_prices[online_idx]
-            price_offline = offline_prices[offline_idx]
+                # 判断是离散还是连续动作
+                if isinstance(act, (int, np.integer)) or (isinstance(act, (float, np.floating)) and act < 50):
+                    # 离散动作：动作索引 (0-35)
+                    act_idx = int(act.item()) if hasattr(act, 'item') else int(act)
+                    online_idx = act_idx // 6
+                    offline_idx = act_idx % 6
+                    price_windows_online.append(online_prices[online_idx])
+                    price_windows_offline.append(offline_prices[offline_idx])
+                else:
+                    # 连续动作：直接价格值 (80-200)
+                    price = float(act.item()) if hasattr(act, 'item') else float(act)
+                    # 线上和线下使用相同价格（简化处理）
+                    price_windows_online.append(price)
+                    price_windows_offline.append(price * 1.1)  # 线下价格略高于线上
+                    
+        elif isinstance(action, (int, np.integer)) or (isinstance(action, (float, np.floating)) and hasattr(action, 'item')):
+            # 单个动作
+            if isinstance(action, (int, np.integer)) or (isinstance(action, (float, np.floating)) and action < 50):
+                # 离散动作
+                action_idx = int(action.item()) if hasattr(action, 'item') else int(action)
+                online_idx = action_idx // 6
+                offline_idx = action_idx % 6
+                price_online = online_prices[online_idx]
+                price_offline = offline_prices[offline_idx]
+            else:
+                # 连续动作
+                price = float(action.item()) if hasattr(action, 'item') else float(action)
+                price_online = price
+                price_offline = price * 1.1
+                
             price_windows_online = [price_online] + self.current_price_window_online[1:]
             price_windows_offline = [price_offline] + self.current_price_window_offline[1:]
         else:
-            raise ValueError(f"ABM模式需要1个或5个动作，收到: {action}, 类型: {type(action)}")
+            raise ValueError(f"不支持的动作类型: {action}, 类型: {type(action)}")
             
         actual_bookings, total_revenue = self._step_with_abm(price_windows_online, price_windows_offline)
             
         # 更新库存
-            # action应该是
         self._update_inventory(actual_bookings)
             
         # 更新统计

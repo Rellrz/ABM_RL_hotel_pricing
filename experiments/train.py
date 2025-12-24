@@ -88,7 +88,7 @@ def main() -> None:
     # 加载历史数据
     historical_data = pd.read_csv(args.data)
     historical_data = historical_data[historical_data['hotel'] == 'City Hotel'].copy()
-    print(f"数据加载完成，共 {len(historical_data)} 条记录")
+    print(f"数据加载完成，共 {len(historical_data)} 条记录") 
         
     # 使用ABM训练RL系统
     rl_system, rewards, revenues = train_rl_system_with_abm(
