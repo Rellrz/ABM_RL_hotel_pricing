@@ -13,6 +13,7 @@
 
 import numpy as np
 import random
+import time
 
 # 从config.py导入随机因子配置
 from configs.config import RANDOM_CONFIG
@@ -33,9 +34,12 @@ def setup_random_factors():
         config.current_status = f"固定模式 - 种子: {config.fixed_seed}"
         print(f"随机因子已设置为固定模式，种子: {config.fixed_seed}")
     else:
-        # 随机模式：不设置随机种子
-        config.current_status = "随机模式 - 不设置种子"
-        print("随机因子已设置为随机模式，结果将具有随机性")
+        # 随机模式：使用时间戳作为种子，确保每次运行都不同
+        time_seed = int(time.time() * 1000) % (2**32)  # 使用毫秒级时间戳
+        np.random.seed(time_seed)
+        random.seed(time_seed)
+        config.current_status = f"随机模式 - 时间戳种子: {time_seed}"
+        print(f"随机因子已设置为随机模式，使用时间戳种子: {time_seed}")
     
     return config
 

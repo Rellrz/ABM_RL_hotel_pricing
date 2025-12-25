@@ -16,19 +16,25 @@ from configs.config import RL_CONFIG
 from src.utils.training_monitor import get_training_monitor
 from src.algorithms.q_learning import QLearning
 from src.algorithms.actor_critic import TabularActorCritic
+from src.algorithms.linear_sarsa import LinearSARSA
+from src.algorithms.cem import CrossEntropyMethod
 
 class HotelAgent:
     """
     酒店定价智能体（支持多算法）
     
-    支持两种强化学习算法：
-    1. Q-learning: 离散动作空间（36个定价组合）
-    2. Actor-Critic: 连续动作空间（价格80-200元）
+    支持多种强化学习算法：
+    1. Q-learning: 离散动作空间（144个定价组合）
+    2. Actor-Critic: 连续动作空间（价格80-170元）
+    3. Linear SARSA: 连续动作空间（线性函数逼近）
+    4. CEM: 连续动作空间（交叉熵方法）
     
     算法切换：
     - 通过配置文件中的 RL_CONFIG.algorithm 参数选择
     - 'q_learning': 使用Q-learning算法
     - 'actor_critic': 使用Actor-Critic算法
+    - 'linear_sarsa': 使用线性SARSA算法
+    - 'cem': 使用交叉熵方法
     
     状态空间：
     - 总状态数：30（库存等级5 × 季节3 × 日期类型2）
@@ -85,6 +91,42 @@ class HotelAgent:
                 epsilon_end=self.epsilon_end,
                 epsilon_decay_episodes=self.epsilon_decay_steps
             )
+            
+        elif self.algorithm_type == 'linear_sarsa':
+            print(f"✅ 使用 Linear SARSA 算法（连续动作空间 + 线性函数逼近）")
+            self.epsilon_start = RL_CONFIG.epsilon_start
+            self.epsilon_end = RL_CONFIG.epsilon_end
+            self.epsilon_decay_steps = RL_CONFIG.epsilon_decay_episodes
+            
+            self.algorithm = LinearSARSA(
+                n_states=self.n_states,
+                action_min=RL_CONFIG.action_min,
+                action_max=RL_CONFIG.action_max,
+                learning_rate=RL_CONFIG.learning_rate,
+                discount_factor=self.discount_factor,
+                epsilon_start=self.epsilon_start,
+                epsilon_end=self.epsilon_end,
+                epsilon_decay_episodes=self.epsilon_decay_steps,
+                n_features=10
+            )
+            
+        elif self.algorithm_type == 'cem':
+            print(f"✅ 使用 CEM 算法（连续动作空间 + 交叉熵方法）")
+            self.epsilon_start = 0.0  # CEM不使用epsilon
+            self.epsilon_end = 0.0
+            self.epsilon_decay_steps = 1
+            
+            self.algorithm = CrossEntropyMethod(
+                n_states=self.n_states,
+                action_min=RL_CONFIG.action_min,
+                action_max=RL_CONFIG.action_max,
+                discount_factor=self.discount_factor,
+                n_samples=RL_CONFIG.cem_n_samples if hasattr(RL_CONFIG, 'cem_n_samples') else 20,
+                elite_frac=RL_CONFIG.cem_elite_frac if hasattr(RL_CONFIG, 'cem_elite_frac') else 0.2,
+                initial_std=RL_CONFIG.initial_std,
+                min_std=RL_CONFIG.min_std,
+                std_decay=RL_CONFIG.std_decay
+            )
         else:
             raise ValueError(f"不支持的算法类型: {self.algorithm_type}")
         
@@ -97,9 +139,17 @@ class HotelAgent:
         """Q表（委托给算法）"""
         if self.algorithm_type == 'q_learning':
             return self.algorithm.q_table
-        else:
+        elif self.algorithm_type == 'actor_critic':
             # Actor-Critic使用actor_table作为策略表
             return self.algorithm.actor_table
+        elif self.algorithm_type == 'linear_sarsa':
+            # Linear SARSA使用权重向量，返回一个空字典以兼容
+            return {}
+        elif self.algorithm_type == 'cem':
+            # CEM使用action_dist，返回一个空字典以兼容
+            return {}
+        else:
+            return {}
     
     @property
     def state_visit_count(self):
@@ -117,9 +167,12 @@ class HotelAgent:
     
     def get_epsilon(self, episode: int) -> float:
         """获取当前的epsilon值"""
-        if self.algorithm_type == 'actor_critic':
-            # Actor-Critic现在使用ε-greedy，直接返回current_epsilon
+        if self.algorithm_type in ['actor_critic', 'linear_sarsa']:
+            # Actor-Critic和Linear SARSA使用ε-greedy，直接返回current_epsilon
             return self.algorithm.current_epsilon
+        elif self.algorithm_type == 'cem':
+            # CEM不使用epsilon
+            return 0.0
         else:
             # Q-learning使用epsilon-greedy
             if episode >= self.epsilon_decay_steps:
@@ -146,11 +199,11 @@ class HotelAgent:
         选择动作
         
         Returns:
-            int: Q-learning返回离散动作索引 (0-35)
-            float: Actor-Critic返回连续价格值 (80-200)
+            int: Q-learning返回离散动作索引 (0-143)
+            float: 连续动作算法返回连续价格值 (80-170)
         """
-        if self.algorithm_type == 'actor_critic':
-            # Actor-Critic: 直接从策略采样连续动作
+        # 连续动作算法：直接委托给算法的select_action方法
+        if self.algorithm_type in ['actor_critic', 'linear_sarsa', 'cem']:
             return self.algorithm.select_action(state, deterministic=False)
         
         # Q-learning: epsilon-greedy + UCB探索
@@ -158,7 +211,7 @@ class HotelAgent:
         state_key = tuple(state) if isinstance(state, (list, np.ndarray)) else state
         q_values = self.algorithm.get_q_values(state)
         
-        # 36个动作组合：action_idx = online_idx * 6 + offline_idx
+        # 144个动作组合：action_idx = online_idx * 12 + offline_idx
         if random.random() < epsilon:
             # 增强探索策略：结合UCB和随机探索
             visit_counts = np.array([self.algorithm.state_action_visit_count.get((state_key, a), 0) for a in range(self.n_actions)])
@@ -203,7 +256,7 @@ class HotelAgent:
     
     def end_episode(self):
         """结束episode，更新相关参数"""
-        if self.algorithm_type == 'actor_critic':
+        if self.algorithm_type in ['actor_critic', 'linear_sarsa', 'cem']:
             self.algorithm.end_episode()
     
     def get_policy(self) -> Dict[Any, Union[int, float]]:
@@ -212,7 +265,20 @@ class HotelAgent:
     
     def get_q_value_stats(self) -> Dict[str, float]:
         """获取算法统计信息"""
-        return self.algorithm.get_statistics()
+        # 不同算法使用不同的方法名
+        if hasattr(self.algorithm, 'get_value_stats'):
+            return self.algorithm.get_value_stats()
+        elif hasattr(self.algorithm, 'get_statistics'):
+            return self.algorithm.get_statistics()
+        else:
+            # 返回默认统计信息
+            return {
+                'mean_q_value': 0.0,
+                'std_q_value': 0.0,
+                'min_q_value': 0.0,
+                'max_q_value': 0.0,
+                'exploration_coverage': 0.0
+            }
     
     def save_agent(self, filepath: str) -> None:
         """

@@ -184,7 +184,7 @@ class RLConfig:
     状态空间: 库存档位 × 季节 × 日期类型 = 5 × 3 × 2 = 30种状态
     """
     # ========== 算法选择 ==========
-    algorithm: str = 'actor_critic'  # 'q_learning' 或 'actor_critic'
+    algorithm: str = 'cem'  # 'q_learning' 或 'actor_critic'
     
     # ========== 通用参数 ==========
     n_states: int = 18
@@ -206,6 +206,10 @@ class RLConfig:
     initial_std: float = 20.0  # 初始探索标准差
     min_std: float = 5.0  # 最小探索标准差 - 极小值减少后期波动
     std_decay: float = 0.995  # 标准差衰减率 - 持续衰减到500轮（0.99）
+    
+    # ========== CEM参数 ==========
+    cem_n_samples: int = 20  # CEM每次采样的动作数量
+    cem_elite_frac: float = 0.2  # CEM精英样本比例（top-k）
     
     episodes: int = 500  # Actor-Critic需要更多轮次
     online_learning_days: int = 90
