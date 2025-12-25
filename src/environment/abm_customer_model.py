@@ -89,11 +89,11 @@ class CustomerAgent(Agent):
         
         # 紧迫性效用：γ/(L+1)
         # 提前期越短，紧迫性越高
-        gamma = self.model.params['urgency_weight']
+        gamma = self.model.params.urgency_weight
         urgency_utility = gamma / (self.profile.lead_time + 1)
         
         # 随机噪声：模拟非理性因素
-        noise_std = self.model.params['noise_std']
+        noise_std = self.model.params.noise_std
         noise = np.random.normal(0, noise_std)
         
         # 总效用
@@ -119,7 +119,7 @@ class CustomerAgent(Agent):
         utility = self.evaluate_booking_utility(price, current_day)
         
         # 决策阈值
-        threshold = self.model.params['booking_threshold']
+        threshold = self.model.params.booking_threshold
         
         # 做出决策
         if utility > threshold:
@@ -397,40 +397,12 @@ class HotelABMModel(Model):
                 continue
             
             # 做出预订决策
-            #if customer.make_booking_decision(price, self.current_day):
-            #    target_date = customer.booking_record.target_date
-                
-                # ✅ 正确的库存检查：检查目标日期的库存
-            #    if self.daily_available_rooms[target_date] > 0:
-                    # ✅ 扣减该日期的库存
-            #        self.daily_available_rooms[target_date] -= 1
-                    
-            #        self.active_bookings.append(customer.booking_record)
-            #        self.booking_history.append(customer.booking_record)
-                    
-            #        if customer.profile.customer_type == 'online':
-            #            new_bookings_online += 1
-            #        else:
-            #            new_bookings_offline += 1
-                # else: 该日期已满房，拒绝预订
-            # 直接在simulate_day中创建booking_record，跳过效用函数
-            if not customer.has_booked and self.daily_available_rooms[target_date] > 0:
-                customer.has_booked = True
-                booking_record = BookingRecord(
-                    customer_id=customer.unique_id,
-                    booking_date=self.current_day,
-                    target_date=target_date,
-                    paid_price=price,
-                    wtp=customer.profile.wtp,
-                    price_sensitivity=customer.profile.price_sensitivity,
-                    customer_type=customer.profile.customer_type)
-                customer.booking_record = booking_record
-                
+            if customer.make_booking_decision(price, self.current_day):
                 target_date = customer.booking_record.target_date
                 
                 # ✅ 正确的库存检查：检查目标日期的库存
                 if self.daily_available_rooms[target_date] > 0:
-                # ✅ 扣减该日期的库存
+                    # ✅ 扣减该日期的库存
                     self.daily_available_rooms[target_date] -= 1
                     
                     self.active_bookings.append(customer.booking_record)
@@ -441,57 +413,86 @@ class HotelABMModel(Model):
                     else:
                         new_bookings_offline += 1
                 # else: 该日期已满房，拒绝预订
+            # 直接在simulate_day中创建booking_record，跳过效用函数
+            #if not customer.has_booked and self.daily_available_rooms[target_date] > 0:
+            #    customer.has_booked = True
+            #    booking_record = BookingRecord(
+            #        customer_id=customer.unique_id,
+            #        booking_date=self.current_day,
+            #        target_date=target_date,
+            #        paid_price=price,
+            #        wtp=customer.profile.wtp,
+            #        price_sensitivity=customer.profile.price_sensitivity,
+            #        customer_type=customer.profile.customer_type)
+            #    customer.booking_record = booking_record
+            #    
+            #    target_date = customer.booking_record.target_date
+                
+                # ✅ 正确的库存检查：检查目标日期的库存
+            #    if self.daily_available_rooms[target_date] > 0:
+                # ✅ 扣减该日期的库存
+            #        self.daily_available_rooms[target_date] -= 1
+            #        
+            #        self.active_bookings.append(customer.booking_record)
+            #        self.booking_history.append(customer.booking_record)
+                    
+            #    if customer.profile.customer_type == 'online':
+            #        new_bookings_online += 1
+            #    else:
+            #        new_bookings_offline += 1
+                # else: 该日期已满房，拒绝预订
 
         
         # 取消评估阶段：遍历所有活跃预订
-        cancellation_refund = 0.0  # 记录取消订单的退款总额
-        active_bookings_copy = self.active_bookings.copy()
-        for booking in active_bookings_copy:
+        #cancellation_refund = 0.0  # 记录取消订单的退款总额
+        #active_bookings_copy = self.active_bookings.copy()
+        #for booking in active_bookings_copy:
             # 找到对应的客户（如果还在系统中）
             # 简化：直接基于预订记录评估
-            days_until_checkin = booking.target_date - self.current_day
+            #days_until_checkin = booking.target_date - self.current_day
             
-            if days_until_checkin <= 0:
+            #if days_until_checkin <= 0:
                 # 已入住，移除活跃预订
-                self.active_bookings.remove(booking)
-                continue
+            #    self.active_bookings.remove(booking)
+            #    continue
             
             # ✅ 评估取消：使用价格窗口中对应日期的价格
-            days_ahead = booking.target_date - self.current_day
-            if 0 <= days_ahead < len(self.price_window_online):
-                if booking.customer_type == 'online':
-                    current_price = self.price_window_online[days_ahead]
-                else:
-                    current_price = self.price_window_offline[days_ahead]
-            else:
-                # 超出窗口，使用默认价格
-                current_price = price_online if booking.customer_type == 'online' else price_offline
+            #days_ahead = booking.target_date - self.current_day
+            #if 0 <= days_ahead < len(self.price_window_online):
+            #    if booking.customer_type == 'online':
+            #        current_price = self.price_window_online[days_ahead]
+            #    else:
+            #        current_price = self.price_window_offline[days_ahead]
+            #else:
+            #    # 超出窗口，使用默认价格
+            #    current_price = price_online if booking.customer_type == 'online' else price_offline
             
             # 计算持有效用
-            satisfaction = booking.wtp - booking.paid_price
-            regret_coef = self.params.regret_coefficient
-            price_regret = regret_coef * max(0, booking.paid_price - current_price)
-            commitment_weight = self.params.commitment_weight
-            commitment_utility = commitment_weight / (days_until_checkin + 1)
-            shock_std = self.params.shock_std
-            daily_shock = np.random.normal(0, shock_std)
+            #satisfaction = booking.wtp - booking.paid_price
+            #regret_coef = self.params.regret_coefficient
+            #price_regret = regret_coef * max(0, booking.paid_price - current_price)
+            #commitment_weight = self.params.commitment_weight
+            #commitment_utility = commitment_weight / (days_until_checkin + 1)
+            #shock_std = self.params.shock_std
+            #daily_shock = np.random.normal(0, shock_std)
             
-            holding_utility = satisfaction - price_regret + commitment_utility + daily_shock
+            #holding_utility = satisfaction - price_regret + commitment_utility + daily_shock
             
             # 取消决策
-            if holding_utility < 0 and not booking.is_canceled:
-                booking.is_canceled = True
+            #if holding_utility < 0 and not booking.is_canceled:
+            #    booking.is_canceled = True
                 # ✅ 释放该日期的库存
-                self.daily_available_rooms[booking.target_date] += 1
+            #    self.daily_available_rooms[booking.target_date] += 1
                 # ✅ 可退款政策：记录退款金额
-                cancellation_refund += booking.paid_price
-                self.active_bookings.remove(booking)
-                cancellations += 1
+            #    cancellation_refund += booking.paid_price
+            #    self.active_bookings.remove(booking)
+            #    cancellations += 1
         
         # 记录当日统计
         gross_revenue = new_bookings_online * price_online + new_bookings_offline * price_offline
-        net_revenue = gross_revenue - cancellation_refund  # ✅ 净收益 = 新预订收益 - 取消退款
-        
+        #net_revenue = gross_revenue - cancellation_refund  # ✅ 净收益 = 新预订收益 - 取消退款
+        net_revenue = gross_revenue
+
         daily_stat = {
             'day': self.current_day,
             'price_online': price_online,
@@ -501,7 +502,7 @@ class HotelABMModel(Model):
             'new_bookings_offline': new_bookings_offline,
             'total_new_bookings': new_bookings_online + new_bookings_offline,
             'cancellations': cancellations,
-            'cancellation_refund': cancellation_refund,  # ✅ 记录退款金额
+            #'cancellation_refund': cancellation_refund,  # ✅ 记录退款金额
             'active_bookings': len(self.active_bookings),
             'revenue_online': new_bookings_online * price_online,
             'revenue_offline': new_bookings_offline * price_offline,

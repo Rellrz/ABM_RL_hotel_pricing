@@ -47,7 +47,10 @@ class TabularActorCritic:
                  discount_factor: float = 0.9,
                  initial_std: float = 20.0,
                  min_std: float = 5.0,
-                 std_decay: float = 0.995):
+                 std_decay: float = 0.995,
+                 epsilon_start: float = 0.9,
+                 epsilon_end: float = 0.01,
+                 epsilon_decay_episodes: int = 100):
         """
         初始化Actor-Critic算法
         
@@ -61,6 +64,9 @@ class TabularActorCritic:
             initial_std: 初始标准差（控制探索程度）
             min_std: 最小标准差（保持最小探索）
             std_decay: 标准差衰减率（每个episode）
+            epsilon_start: 初始探索率（ε-greedy）
+            epsilon_end: 最终探索率
+            epsilon_decay_episodes: 探索率衰减的episode数
         """
         self.n_states = n_states
         self.action_min = action_min
@@ -74,6 +80,12 @@ class TabularActorCritic:
         self.current_std = initial_std
         self.min_std = min_std
         self.std_decay = std_decay
+        
+        # ε-greedy探索参数
+        self.epsilon_start = epsilon_start
+        self.epsilon_end = epsilon_end
+        self.epsilon_decay_episodes = epsilon_decay_episodes
+        self.current_epsilon = epsilon_start
         
         # Actor表：状态 -> 动作均值μ(s)
         # 初始化为动作空间的中点
@@ -90,7 +102,15 @@ class TabularActorCritic:
     def select_action(self, state: Union[List, np.ndarray, int], 
                      deterministic: bool = False) -> float:
         """
-        根据当前策略选择动作
+        根据当前策略选择动作（改进版：ε-greedy + 高斯探索）
+        
+        探索策略：
+        1. 以ε概率进行均匀随机探索（和Q-learning一样）
+        2. 以(1-ε)概率使用策略均值（确定性）
+        
+        这种混合策略结合了：
+        - ε-greedy的均匀探索（避免陷入局部最优）
+        - Actor-Critic的策略学习（利用学到的知识）
         
         Args:
             state: 当前状态
@@ -104,16 +124,17 @@ class TabularActorCritic:
         # 获取策略均值μ(s)
         mean = self.actor_table[state_key]
         
-        # 自适应探索：当标准差很小时，自动切换到确定性策略
-        # 这可以消除后期的随机波动
-        use_deterministic = deterministic or (self.current_std <= 1.0)
-        
-        if use_deterministic:
-            # 确定性策略：直接返回均值
+        if deterministic:
+            # 确定性策略：直接返回均值（用于评估）
             action = mean
         else:
-            # 随机策略：从高斯分布采样 a ~ N(μ(s), σ²)
-            action = np.random.normal(mean, self.current_std)
+            # ε-greedy探索
+            if np.random.random() < self.current_epsilon:
+                # 探索：均匀随机选择动作（和Q-learning一样）
+                action = np.random.uniform(self.action_min, self.action_max)
+            else:
+                # 利用：使用策略均值（确定性）
+                action = mean
         
         # 裁剪到有效范围
         action = np.clip(action, self.action_min, self.action_max)
@@ -197,8 +218,20 @@ class TabularActorCritic:
         # 返回TD误差（用于兼容Q-learning接口，返回类似"新Q值"的概念）
         return float(td_target)
     
+    def decay_epsilon(self):
+        """衰减探索率（ε-greedy）"""
+        if self.episode_count < self.epsilon_decay_episodes:
+            # 线性衰减
+            decay_rate = (self.epsilon_start - self.epsilon_end) / self.epsilon_decay_episodes
+            self.current_epsilon = self.epsilon_start - decay_rate * self.episode_count
+        else:
+            self.current_epsilon = self.epsilon_end
+        
+        # 确保不低于最小值
+        self.current_epsilon = max(self.epsilon_end, self.current_epsilon)
+    
     def decay_std(self):
-        """衰减标准差（减少探索）"""
+        """衰减标准差（减少探索）- 保留用于兼容性"""
         self.current_std = max(
             self.min_std,
             self.current_std * self.std_decay
@@ -207,7 +240,7 @@ class TabularActorCritic:
     def end_episode(self):
         """结束一个episode，更新相关参数"""
         self.episode_count += 1
-        self.decay_std()
+        self.decay_epsilon()  # 使用ε衰减代替标准差衰减
     
     def get_policy(self) -> Dict[Any, float]:
         """
@@ -254,6 +287,7 @@ class TabularActorCritic:
             'num_states': explored_states,
             'episode_count': self.episode_count,
             'current_std': float(self.current_std),
+            'current_epsilon': float(self.current_epsilon),
             'exploration_coverage': float(exploration_coverage),
             'policy_mean_avg': float(np.mean(policy_means)) if policy_means else 0.0,
             'policy_mean_std': float(np.std(policy_means)) if policy_means else 0.0,
@@ -280,4 +314,5 @@ class TabularActorCritic:
         self.critic_table = defaultdict(float)
         self.state_visit_count = defaultdict(int)
         self.current_std = self.initial_std
+        self.current_epsilon = self.epsilon_start
         self.episode_count = 0

@@ -160,9 +160,9 @@ class ABMConfig:
     lead_time_params: Dict[str, float] = field(default_factory=lambda: {'mean': 104.0})
     wtp_params: Dict[str, float] = field(default_factory=lambda: {'mean': 100.0, 'std': 30.0})
     
-    urgency_weight: float = 7.5
+    urgency_weight: float = 20
     noise_std: float = 12.0
-    booking_threshold: float = 0.0
+    booking_threshold: float = -15
     
     regret_coefficient: float = 0.75
     commitment_weight: float = 8.0
@@ -188,24 +188,24 @@ class RLConfig:
     
     # ========== 通用参数 ==========
     n_states: int = 18
-    n_actions: int = 36  # Q-learning使用
+    n_actions: int = 144  # Q-learning使用
     discount_factor: float = 0.99
     
     # ========== Q-learning参数 ==========
     learning_rate: float = 0.05  # Q-learning学习率
     epsilon_start: float = 0.9
-    epsilon_end: float = 0.01
-    epsilon_decay_episodes: int = 100
+    epsilon_end: float = 0.05
+    epsilon_decay_episodes: int = 300  # 延长探索期，避免过早收敛
     epsilon_min: float = 0.01
     
     # ========== Actor-Critic参数 ==========
-    actor_lr: float = 0.005  # Actor学习率（策略更新）- 降低以提高稳定性
-    critic_lr: float = 0.05  # Critic学习率（价值更新）
+    actor_lr: float = 0.002  # Actor学习率（策略更新）- 降低以提高稳定性（0.005）
+    critic_lr: float = 0.02  # Critic学习率（价值更新）（0.05）
     action_min: float = 80.0  # 最低价格
-    action_max: float = 200.0  # 最高价格
+    action_max: float = 170.0  # 最高价格
     initial_std: float = 20.0  # 初始探索标准差
-    min_std: float = 0.5  # 最小探索标准差 - 极小值减少后期波动
-    std_decay: float = 0.99  # 标准差衰减率 - 持续衰减到500轮
+    min_std: float = 5.0  # 最小探索标准差 - 极小值减少后期波动
+    std_decay: float = 0.995  # 标准差衰减率 - 持续衰减到500轮（0.99）
     
     episodes: int = 500  # Actor-Critic需要更多轮次
     online_learning_days: int = 90
@@ -213,8 +213,8 @@ class RLConfig:
     
     enable_online_learning: bool = False
     
-    online_price_levels: List[int] = field(default_factory=lambda: [80, 90, 100, 110, 120, 130])
-    offline_price_levels: List[int] = field(default_factory=lambda: [90, 105, 120, 135, 150, 165])
+    online_price_levels: List[int] = field(default_factory=lambda: [80,85, 90, 95, 100, 105,110, 115, 120, 125, 130, 135])
+    offline_price_levels: List[int] = field(default_factory=lambda: [90,95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145])
     
     agent_paths: Dict[str, str] = field(default_factory=lambda: {
         'pretrained': os.path.join(PROJECT_ROOT, '02_训练模型', 'q_agent_pretrained.pkl'),
@@ -230,9 +230,10 @@ class EnvConfig:
     max_inventory: int = 100
     min_inventory: int = 0
     
-    online_price_levels: List[int] = field(default_factory=lambda: [80, 90, 100, 110, 120, 130])
-    offline_price_levels: List[int] = field(default_factory=lambda: [90, 105, 120, 135, 150, 165])
-    n_actions: int = 36
+    online_price_levels: List[int] = field(default_factory=lambda: [80,85, 90, 95, 100, 105,110, 115, 120, 125, 130, 135])
+    offline_price_levels: List[int] = field(default_factory=lambda: [90,95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145])
+    
+    n_actions: int = 144
     
     demand_weight: float = 0.7
     inventory_weight: float = 0.3

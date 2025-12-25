@@ -12,7 +12,7 @@ import pandas as pd
 from scipy import stats
 
 # 本地模块导入
-from configs.config import ABM_CONFIG
+from configs.config import ABM_CONFIG, RANDOM_CONFIG
 from src.utils.training_monitor import get_training_monitor
 from src.environment.abm_customer_model import HotelABMModel
 from configs.config import ENV_CONFIG
@@ -83,10 +83,11 @@ class HotelEnvironment:
         # ✅ 预订窗口：客户只能预订未来N天（包括今天）
         self.booking_window_days = booking_window_days  # 默认5天
         
-        # ABM模式配置
+        # ABM模式配置 - 根据RANDOM_CONFIG决定是否使用随机种子
+        abm_random_seed = RANDOM_CONFIG.fixed_seed if RANDOM_CONFIG.random_mode == 'fixed' else None
         self.abm_model = HotelABMModel(
             historical_data=historical_data,
-            random_seed=42
+            random_seed=abm_random_seed
             )
         
         # ✅ 初始化未来库存数组：使用booking_window_days作为窗口大小
@@ -379,8 +380,9 @@ class HotelEnvironment:
                 if isinstance(act, (int, np.integer)) or (isinstance(act, (float, np.floating)) and act < 50):
                     # 离散动作：动作索引 (0-35)
                     act_idx = int(act.item()) if hasattr(act, 'item') else int(act)
-                    online_idx = act_idx // 6
-                    offline_idx = act_idx % 6
+                    n_offline = len(offline_prices)
+                    online_idx = act_idx // n_offline
+                    offline_idx = act_idx % n_offline
                     price_windows_online.append(online_prices[online_idx])
                     price_windows_offline.append(offline_prices[offline_idx])
                 else:
@@ -395,8 +397,10 @@ class HotelEnvironment:
             if isinstance(action, (int, np.integer)) or (isinstance(action, (float, np.floating)) and action < 50):
                 # 离散动作
                 action_idx = int(action.item()) if hasattr(action, 'item') else int(action)
-                online_idx = action_idx // 6
-                offline_idx = action_idx % 6
+                n_offline = len(offline_prices)
+                online_idx = action_idx // n_offline
+                offline_idx = action_idx % n_offline
+
                 price_online = online_prices[online_idx]
                 price_offline = offline_prices[offline_idx]
             else:

@@ -66,7 +66,11 @@ class HotelAgent:
             )
             
         elif self.algorithm_type == 'actor_critic':
-            print(f"✅ 使用 Actor-Critic 算法（连续动作空间）")
+            print(f"✅ 使用 Actor-Critic 算法（连续动作空间 + ε-greedy探索）")
+            self.epsilon_start = RL_CONFIG.epsilon_start
+            self.epsilon_end = RL_CONFIG.epsilon_end
+            self.epsilon_decay_steps = RL_CONFIG.epsilon_decay_episodes
+            
             self.algorithm = TabularActorCritic(
                 n_states=self.n_states,
                 action_min=RL_CONFIG.action_min,
@@ -76,12 +80,11 @@ class HotelAgent:
                 discount_factor=self.discount_factor,
                 initial_std=RL_CONFIG.initial_std,
                 min_std=RL_CONFIG.min_std,
-                std_decay=RL_CONFIG.std_decay
+                std_decay=RL_CONFIG.std_decay,
+                epsilon_start=self.epsilon_start,
+                epsilon_end=self.epsilon_end,
+                epsilon_decay_episodes=self.epsilon_decay_steps
             )
-            # 为Actor-Critic设置兼容属性
-            self.epsilon_start = 0.0  # AC不使用epsilon
-            self.epsilon_end = 0.0
-            self.epsilon_decay_steps = 1
         else:
             raise ValueError(f"不支持的算法类型: {self.algorithm_type}")
         
@@ -115,8 +118,8 @@ class HotelAgent:
     def get_epsilon(self, episode: int) -> float:
         """获取当前的epsilon值"""
         if self.algorithm_type == 'actor_critic':
-            # Actor-Critic使用高斯噪声，返回当前标准差作为探索率
-            return self.algorithm.current_std / RL_CONFIG.initial_std  # 归一化到[0,1]
+            # Actor-Critic现在使用ε-greedy，直接返回current_epsilon
+            return self.algorithm.current_epsilon
         else:
             # Q-learning使用epsilon-greedy
             if episode >= self.epsilon_decay_steps:
