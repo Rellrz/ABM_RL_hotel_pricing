@@ -5,7 +5,9 @@ Q-learning算法模块
 """
 
 import numpy as np
+import random
 from collections import defaultdict
+from configs.config import RL_CONFIG
 from typing import Dict, Any, Union, List, Tuple
 
 
@@ -44,6 +46,9 @@ class QLearning:
         self.n_actions = n_actions
         self.learning_rate = learning_rate
         self.discount_factor = discount_factor
+        self.epsilon_start = RL_CONFIG.epsilon_start
+        self.epsilon_end = RL_CONFIG.epsilon_end
+        self.epsilon_decay_steps = RL_CONFIG.epsilon_decay_episodes
         
         # Q表：使用defaultdict自动初始化为零
         self.q_table = defaultdict(lambda: np.zeros(n_actions))
@@ -52,6 +57,56 @@ class QLearning:
         self.state_visit_count = defaultdict(int)
         self.state_action_visit_count = defaultdict(int)
     
+    def select_action(self, state, episode):
+        # Q-learning: epsilon-greedy + UCB探索
+        epsilon = self.get_epsilon(episode)
+        state_key = tuple(state) if isinstance(state, (list, np.ndarray)) else state
+        q_values = self.get_q_values(state)
+        
+        # 144个动作组合：action_idx = online_idx * 12 + offline_idx
+        if random.random() < epsilon:
+            # 增强探索策略：结合UCB和随机探索
+            visit_counts = np.array([self.state_action_visit_count.get((state_key, a), 0) for a in range(self.n_actions)])
+            
+            # 如果存在完全未探索的动作（访问次数为0），优先选择这些动作
+            unvisited_actions = np.where(visit_counts == 0)[0]
+            if len(unvisited_actions) > 0:
+                # 如果有未探索的动作，随机选择一个
+                return random.choice(unvisited_actions)
+            
+            # 否则使用UCB策略选择访问次数最少的动作
+            min_visits = np.min(visit_counts)
+            least_visited_actions = np.where(visit_counts == min_visits)[0]
+            
+            if len(least_visited_actions) > 1:
+                # 如果有多个最少访问的动作，选择Q值较高的那个
+                q_values_least = q_values[least_visited_actions]
+                best_idx = np.argmax(q_values_least)
+                return least_visited_actions[best_idx]
+            else:
+                return least_visited_actions[0]
+        else:
+            # 利用：选择Q值最大的动作
+            # 如果有多个最大值，优先选择访问次数较少的
+            max_q = np.max(q_values)
+            best_actions = np.where(q_values == max_q)[0]
+            
+            if len(best_actions) > 1:
+                # 在最佳动作中选择访问次数最少的
+                visit_counts = np.array([self.state_action_visit_count.get((state_key, a), 0) for a in best_actions])
+                least_visited_idx = np.argmin(visit_counts)
+                return best_actions[least_visited_idx]
+            else:
+                return best_actions[0]
+    
+    def get_epsilon(self, episode):
+        if episode >= self.epsilon_decay_steps:
+            return self.epsilon_end
+        else:
+            decay_rate = self.epsilon_decay_steps / 2
+            epsilon = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-episode / decay_rate)
+            return epsilon
+
     def get_q_value(self, state: Union[List, np.ndarray, int], action: int) -> float:
         """
         获取指定状态-动作对的Q值

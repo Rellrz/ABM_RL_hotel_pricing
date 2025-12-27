@@ -175,12 +175,8 @@ class HotelAgent:
             return 0.0
         else:
             # Q-learning使用epsilon-greedy
-            if episode >= self.epsilon_decay_steps:
-                return self.epsilon_end
-            else:
-                decay_rate = self.epsilon_decay_steps / 2
-                epsilon = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * np.exp(-episode / decay_rate)
-                return epsilon
+            return self.algorithm.get_epsilon(episode)
+
     
     def discretize_state(self, state_info: Dict[str, Any], season: int, weekday: int) -> int:
         """离散化状态 - 基于当前库存、季节和日期类型"""
@@ -205,47 +201,9 @@ class HotelAgent:
         # 连续动作算法：直接委托给算法的select_action方法
         if self.algorithm_type in ['actor_critic', 'linear_sarsa', 'cem']:
             return self.algorithm.select_action(state, deterministic=False)
-        
-        # Q-learning: epsilon-greedy + UCB探索
-        epsilon = self.get_epsilon(episode)
-        state_key = tuple(state) if isinstance(state, (list, np.ndarray)) else state
-        q_values = self.algorithm.get_q_values(state)
-        
-        # 144个动作组合：action_idx = online_idx * 12 + offline_idx
-        if random.random() < epsilon:
-            # 增强探索策略：结合UCB和随机探索
-            visit_counts = np.array([self.algorithm.state_action_visit_count.get((state_key, a), 0) for a in range(self.n_actions)])
-            
-            # 如果存在完全未探索的动作（访问次数为0），优先选择这些动作
-            unvisited_actions = np.where(visit_counts == 0)[0]
-            if len(unvisited_actions) > 0:
-                # 如果有未探索的动作，随机选择一个
-                return random.choice(unvisited_actions)
-            
-            # 否则使用UCB策略选择访问次数最少的动作
-            min_visits = np.min(visit_counts)
-            least_visited_actions = np.where(visit_counts == min_visits)[0]
-            
-            if len(least_visited_actions) > 1:
-                # 如果有多个最少访问的动作，选择Q值较高的那个
-                q_values_least = q_values[least_visited_actions]
-                best_idx = np.argmax(q_values_least)
-                return least_visited_actions[best_idx]
-            else:
-                return least_visited_actions[0]
-        else:
-            # 利用：选择Q值最大的动作
-            # 如果有多个最大值，优先选择访问次数较少的
-            max_q = np.max(q_values)
-            best_actions = np.where(q_values == max_q)[0]
-            
-            if len(best_actions) > 1:
-                # 在最佳动作中选择访问次数最少的
-                visit_counts = np.array([self.algorithm.state_action_visit_count.get((state_key, a), 0) for a in best_actions])
-                least_visited_idx = np.argmin(visit_counts)
-                return best_actions[least_visited_idx]
-            else:
-                return best_actions[0]
+        elif self.algorithm_type == 'q_learning':
+            return self.algorithm.select_action(state, episode)
+
     
     def update_q_table(self, state: Union[List, np.ndarray, int], action: Union[int, float], 
                       reward: float, next_state: Union[List, np.ndarray, int], done: bool) -> float:

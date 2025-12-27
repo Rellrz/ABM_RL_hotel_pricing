@@ -87,39 +87,63 @@ class LinearSARSA(BaseRLAlgorithm):
     def _extract_features(self, state: Union[List, np.ndarray, int], 
                          action: float) -> np.ndarray:
         """
-        提取特征向量 φ(s, a)
+        提取特征向量 φ(s, a) - 业务可解释版本
         
-        特征设计：
-        1. 状态特征（归一化）
-        2. 动作特征（价格及其多项式）
-        3. 交互特征（状态×动作）
+        特征设计原则：每个特征都有明确的业务含义
+        
+        状态解码：
+        - state = inventory_level * 6 + season * 2 + weekday
+        - inventory_level: 0-4 (5档：0-20%, 20-40%, 40-60%, 60-80%, 80-100%)
+        - season: 0-2 (淡季、平季、旺季)
+        - weekday: 0-1 (工作日、周末)
         
         Args:
-            state: 状态
-            action: 动作（价格）
+            state: 状态索引
+            action: 动作（价格，单位：元）
             
         Returns:
-            特征向量
+            特征向量 [10维]
         """
-        # 归一化动作到[0, 1]
-        normalized_action = (action - self.action_min) / (self.action_max - self.action_min)
+        # 解码状态
+        state_idx = state if isinstance(state, int) else 0
+        inventory_level = state_idx // 6  # 0-4
+        season = (state_idx % 6) // 2     # 0-2
+        weekday = state_idx % 2           # 0-1
         
-        # 状态索引（假设是整数）
-        state_idx = state if isinstance(state, int) else tuple(state)
-        state_normalized = float(state_idx) / self.n_states if isinstance(state_idx, int) else 0.5
+        # 归一化价格到[0, 1]
+        price_normalized = (action - self.action_min) / (self.action_max - self.action_min)
         
-        # 构建特征向量
+        # === 业务可解释特征 ===
         features = np.array([
-            1.0,                              # 偏置项
-            state_normalized,                 # 状态特征
-            normalized_action,                # 动作（线性）
-            normalized_action ** 2,           # 动作（二次）
-            normalized_action ** 3,           # 动作（三次）
-            state_normalized * normalized_action,  # 状态×动作
-            state_normalized * normalized_action ** 2,  # 状态×动作^2
-            np.sin(2 * np.pi * normalized_action),  # 周期特征
-            np.cos(2 * np.pi * normalized_action),  # 周期特征
-            np.exp(-((normalized_action - 0.5) ** 2) / 0.1)  # 高斯特征
+            # 1. 基准收益（偏置项）
+            1.0,
+            
+            # 2. 库存压力（0-1，越高越需要降价）
+            inventory_level / 4.0,
+            
+            # 3. 季节需求（0=淡季, 0.5=平季, 1=旺季）
+            season / 2.0,
+            
+            # 4. 周末溢价（0=工作日, 1=周末）
+            float(weekday),
+            
+            # 5. 价格水平（归一化价格）
+            price_normalized,
+            
+            # 6. 价格弹性（价格偏离中点的程度）
+            (price_normalized - 0.5) ** 2,
+            
+            # 7. 库存-价格交互（库存高→价格应低）
+            (inventory_level / 4.0) * (1 - price_normalized),
+            
+            # 8. 季节-价格交互（旺季→价格可高）
+            (season / 2.0) * price_normalized,
+            
+            # 9. 周末-价格交互（周末→价格可高）
+            float(weekday) * price_normalized,
+            
+            # 10. 综合需求指标（低库存+旺季+周末）
+            (1 - inventory_level / 4.0) * (season / 2.0) * (1 + weekday)
         ])
         
         return features[:self.n_features]
@@ -154,7 +178,7 @@ class LinearSARSA(BaseRLAlgorithm):
             最优动作
         """
         # 网格搜索
-        n_samples = 50
+        n_samples = 200
         actions = np.linspace(self.action_min, self.action_max, n_samples)
         q_values = [self._estimate_q(state, a) for a in actions]
         best_idx = np.argmax(q_values)

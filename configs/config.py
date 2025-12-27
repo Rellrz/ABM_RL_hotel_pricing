@@ -184,7 +184,7 @@ class RLConfig:
     状态空间: 库存档位 × 季节 × 日期类型 = 5 × 3 × 2 = 30种状态
     """
     # ========== 算法选择 ==========
-    algorithm: str = 'cem'  # 'q_learning' 或 'actor_critic'
+    algorithm: str = 'q_learning'  # 'q_learning' 或 'actor_critic'
     
     # ========== 通用参数 ==========
     n_states: int = 18
