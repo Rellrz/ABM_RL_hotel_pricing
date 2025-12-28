@@ -1,0 +1,332 @@
+"""
+双渠道酒店Agent模块
+
+酒店代理，负责分别决策线上基础价格和线下价格
+使用两个独立的CEM算法进行决策
+
+业务逻辑：
+- 线上价格：给OTA的基础价格（需覆盖佣金成本）
+- 线下价格：直销渠道价格
+- 考虑OTA补贴行为预测
+- 平衡线上线下渠道收益
+"""
+
+import numpy as np
+from collections import defaultdict, deque
+from typing import Union, List, Dict, Any, Tuple
+from src.algorithms.cem import CrossEntropyMethod
+
+
+class HotelAgentDualChannel:
+    """
+    双渠道酒店Agent：使用两个独立的CEM分别决策线上和线下价格
+    
+    状态空间：
+    - 库存水平
+    - 季节
+    - 是否周末
+    - 提前预订天数
+    
+    动作空间：
+    - price_online_base ∈ [90, 180]（线上基础价格，需覆盖佣金）
+    - price_offline ∈ [80, 170]（线下价格）
+    
+    收益函数：
+    - revenue = revenue_online + revenue_offline
+    - revenue_online = bookings_online * price_online_base * (1 - commission_rate)
+    - revenue_offline = bookings_offline * price_offline
+    """
+    
+    def __init__(self,
+                 n_states: int = 18,
+                 commission_rate: float = 0.15,
+                 online_price_min: float = 90.0,
+                 online_price_max: float = 180.0,
+                 offline_price_min: float = 80.0,
+                 offline_price_max: float = 170.0,
+                 n_samples: int = 20,
+                 elite_frac: float = 0.2,
+                 initial_std: float = 20.0,
+                 min_std: float = 2.0,
+                 std_decay: float = 0.99):
+        """
+        初始化双渠道酒店Agent
+        
+        Args:
+            n_states: 状态空间大小
+            commission_rate: OTA佣金率
+            online_price_min: 线上基础价格最小值
+            online_price_max: 线上基础价格最大值
+            offline_price_min: 线下价格最小值
+            offline_price_max: 线下价格最大值
+            n_samples: CEM采样数量
+            elite_frac: 精英样本比例
+            initial_std: 初始标准差
+            min_std: 最小标准差
+            std_decay: 标准差衰减率
+        """
+        self.n_states = n_states
+        self.commission_rate = commission_rate
+        self.online_price_min = online_price_min
+        self.online_price_max = online_price_max
+        self.offline_price_min = offline_price_min
+        self.offline_price_max = offline_price_max
+        
+        # 线上价格CEM（考虑佣金，价格范围更高）
+        self.cem_online = CrossEntropyMethod(
+            n_states=n_states,
+            action_min=online_price_min,
+            action_max=online_price_max,
+            discount_factor=0.99,
+            n_samples=n_samples,
+            elite_frac=elite_frac,
+            initial_std=initial_std,
+            min_std=min_std,
+            std_decay=std_decay
+        )
+        
+        # 线下价格CEM
+        self.cem_offline = CrossEntropyMethod(
+            n_states=n_states,
+            action_min=offline_price_min,
+            action_max=offline_price_max,
+            discount_factor=0.99,
+            n_samples=n_samples,
+            elite_frac=elite_frac,
+            initial_std=initial_std,
+            min_std=min_std,
+            std_decay=std_decay
+        )
+        
+        # OTA补贴历史（用于预测OTA行为）
+        self.ota_subsidy_history = deque(maxlen=30)
+        
+        # 统计信息
+        self.total_revenue = 0.0
+        self.total_revenue_online = 0.0
+        self.total_revenue_offline = 0.0
+        self.episode_count = 0
+        
+    def discretize_state(self, state: Dict, season: int = None, weekday: bool = None) -> int:
+        """
+        离散化状态
+        
+        状态空间：库存档位(5) × 季节(3) × 日期类型(2) = 30种状态
+        但实际使用18种（简化版）
+        
+        Args:
+            state: 状态字典
+            season: 季节（0-2）
+            weekday: 是否周末
+            
+        Returns:
+            state_idx: 离散化的状态索引
+        """
+        if isinstance(state, (int, np.integer)):
+            return int(state)
+        
+        # 提取状态特征
+        if isinstance(state, dict):
+            inventory = state.get('inventory', [100])[0] if isinstance(state.get('inventory'), list) else state.get('inventory', 100)
+            season = state.get('season', 0) if season is None else season
+            weekday = state.get('weekday', 0) if weekday is None else weekday
+        else:
+            inventory = state[0] if len(state) > 0 else 100
+            season = season if season is not None else 0
+            weekday = weekday if weekday is not None else 0
+        
+        # 库存档位（0-4）：0-20, 20-40, 40-60, 60-80, 80-100
+        inventory_level = min(4, int(inventory / 20))
+        
+        # 季节（0-2）：淡季、平季、旺季
+        season = int(season) % 3
+        
+        # 日期类型（0-1）：工作日、周末
+        weekday = int(weekday)
+        
+        # 组合状态索引：5 × 3 × 2 = 30，但我们简化为18
+        state_idx = inventory_level * 3 + season
+        
+        return state_idx
+    
+    def select_action(self, state: Union[Dict, int], deterministic: bool = False) -> np.ndarray:
+        """
+        分别决策线上基础价格和线下价格
+        
+        策略考虑：
+        1. 线上基础价格要能覆盖佣金成本
+        2. 预测OTA补贴行为，确保最终线上价格有竞争力
+        3. 平衡线上线下渠道
+        
+        Args:
+            state: 当前状态
+            deterministic: 是否使用确定性策略
+            
+        Returns:
+            [price_online_base, price_offline]
+        """
+        # 离散化状态
+        if isinstance(state, dict):
+            state_idx = self.discretize_state(state)
+        else:
+            state_idx = state
+        
+        # 分别选择动作
+        price_online_base = self.cem_online.select_action(state_idx, deterministic)
+        price_offline = self.cem_offline.select_action(state_idx, deterministic)
+        
+        # 约束1：线上基础价格要能覆盖佣金成本
+        # 如果线上基础价格*(1-佣金率) < 线下价格，说明线上不划算
+        #min_online_base = price_offline / (1 - self.commission_rate)
+        #if price_online_base < min_online_base:
+        #    price_online_base = min_online_base
+        
+        # 约束2：考虑OTA补贴预测
+        # 预测OTA可能的补贴
+        #if len(self.ota_subsidy_history) > 0:
+        #    expected_subsidy = np.mean(self.ota_subsidy_history)
+        #else:
+        #    expected_subsidy = 5.0  # 默认预期补贴
+        
+        # 计算预期最终线上价格
+        #expected_online_final = price_online_base - expected_subsidy
+        
+        # 如果预期最终线上价格还是比线下贵太多，调整基础价格
+        #if expected_online_final > price_offline * 1.3:
+            # 线上即使补贴后仍比线下贵30%以上，降低基础价格
+            #price_online_base = price_offline * 1.3 + expected_subsidy
+        
+        # 约束3：确保价格在有效范围内
+        price_online_base = np.clip(price_online_base, self.online_price_min, self.online_price_max)
+        price_offline = np.clip(price_offline, self.offline_price_min, self.offline_price_max)
+        
+        return np.array([price_online_base, price_offline])
+    
+    def update(self, 
+              state: Union[Dict, int], 
+              action: np.ndarray, 
+              reward: float, 
+              next_state: Union[Dict, int], 
+              done: bool,
+              ota_subsidy: float = 0.0) -> None:
+        """
+        分别更新两个CEM
+        
+        Args:
+            state: 当前状态
+            action: [price_online_base, price_offline]
+            reward: 酒店总收益（已扣除佣金）
+            next_state: 下一状态
+            done: 是否结束
+            ota_subsidy: OTA实际补贴金额（用于学习预测）
+        """
+        price_online_base, price_offline = action
+        
+        # 更新OTA补贴历史
+        self.ota_subsidy_history.append(ota_subsidy)
+        
+        # 离散化状态
+        if isinstance(state, dict):
+            state_idx = self.discretize_state(state)
+        else:
+            state_idx = state
+            
+        if isinstance(next_state, dict):
+            next_state_idx = self.discretize_state(next_state)
+        else:
+            next_state_idx = next_state
+        
+        # 两个CEM使用相同的总收益（简化方案）
+        # 更高级的方案可以根据渠道收益分配权重
+        self.cem_online.update(state_idx, price_online_base, reward, next_state_idx, done)
+        self.cem_offline.update(state_idx, price_offline, reward, next_state_idx, done)
+        
+        # 更新统计
+        self.total_revenue += reward
+    
+    def end_episode(self) -> None:
+        """结束episode，更新分布参数"""
+        self.cem_online.end_episode()
+        self.cem_offline.end_episode()
+        self.episode_count += 1
+    
+    def calculate_revenue(self, 
+                         bookings_online: int, 
+                         bookings_offline: int,
+                         price_online_base: float, 
+                         price_offline: float) -> float:
+        """
+        计算酒店收益（扣除佣金）
+        
+        Args:
+            bookings_online: 线上预订量
+            bookings_offline: 线下预订量
+            price_online_base: 线上基础价格
+            price_offline: 线下价格
+            
+        Returns:
+            total_revenue: 酒店总收益
+        """
+        # 线上收益（扣除佣金）
+        revenue_online = bookings_online * price_online_base * (1 - self.commission_rate)
+        
+        # 线下收益（无佣金）
+        revenue_offline = bookings_offline * price_offline
+        
+        # 总收益
+        total_revenue = revenue_online + revenue_offline
+        
+        # 更新统计
+        self.total_revenue_online += revenue_online
+        self.total_revenue_offline += revenue_offline
+        
+        return total_revenue
+    
+    def get_epsilon(self, episode: int = 0) -> float:
+        """
+        获取探索率（CEM使用标准差，这里返回平均标准差作为参考）
+        
+        Args:
+            episode: 当前episode
+            
+        Returns:
+            探索率（标准差的归一化值）
+        """
+        # 获取两个CEM的平均标准差
+        std_online = np.mean([std for std in self.cem_online.std_table.values()]) if self.cem_online.std_table else self.cem_online.initial_std
+        std_offline = np.mean([std for std in self.cem_offline.std_table.values()]) if self.cem_offline.std_table else self.cem_offline.initial_std
+        avg_std = (std_online + std_offline) / 2.0
+        
+        # 归一化到0-1范围
+        normalized_std = avg_std / self.cem_online.initial_std
+        
+        return normalized_std
+    
+    def get_statistics(self) -> Dict[str, float]:
+        """
+        获取酒店统计信息
+        
+        Returns:
+            统计信息字典
+        """
+        return {
+            'total_revenue': self.total_revenue,
+            'total_revenue_online': self.total_revenue_online,
+            'total_revenue_offline': self.total_revenue_offline,
+            'avg_revenue_per_episode': self.total_revenue / max(1, self.episode_count),
+            'online_revenue_ratio': self.total_revenue_online / max(1, self.total_revenue),
+            'episode_count': self.episode_count,
+            'avg_ota_subsidy': np.mean(self.ota_subsidy_history) if len(self.ota_subsidy_history) > 0 else 0.0
+        }
+    
+    def get_policy(self) -> Dict[str, Dict[Any, float]]:
+        """获取当前策略"""
+        return {
+            'online': self.cem_online.get_policy(),
+            'offline': self.cem_offline.get_policy()
+        }
+    
+    @property
+    def q_table(self) -> Dict:
+        """兼容性接口：返回空字典（CEM不使用Q表）"""
+        return {}

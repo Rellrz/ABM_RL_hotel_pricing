@@ -184,7 +184,7 @@ class RLConfig:
     状态空间: 库存档位 × 季节 × 日期类型 = 5 × 3 × 2 = 30种状态
     """
     # ========== 算法选择 ==========
-    algorithm: str = 'q_learning'  # 'q_learning' 或 'actor_critic'
+    algorithm: str = 'cem'  # 'q_learning' 或 'actor_critic'
     
     # ========== 通用参数 ==========
     n_states: int = 18
@@ -210,6 +210,17 @@ class RLConfig:
     # ========== CEM参数 ==========
     cem_n_samples: int = 20  # CEM每次采样的动作数量
     cem_elite_frac: float = 0.2  # CEM精英样本比例（top-k）
+    
+    # ========== 博弈系统参数 ==========
+    enable_game_mode: bool = False  # 是否启用酒店-OTA博弈模式
+    commission_rate: float = 0.15  # OTA佣金率（15%）
+    subsidy_ratio_min: float = 0.0  # OTA补贴比例最小值（0%，不补贴）
+    subsidy_ratio_max: float = 0.8  # OTA补贴比例最大值（80%，最多补贴佣金的80%）
+    online_price_min: float = 90.0  # 线上基础价格最小值（需覆盖佣金）
+    online_price_max: float = 180.0  # 线上基础价格最大值
+    offline_price_min: float = 80.0  # 线下价格最小值
+    offline_price_max: float = 170.0  # 线下价格最大值
+    game_training_mode: str = 'simultaneous'  # 训练模式：'fixed_ota', 'alternating', 'simultaneous'
     
     episodes: int = 500  # Actor-Critic需要更多轮次
     online_learning_days: int = 90

@@ -318,6 +318,9 @@ class HotelEnvironment:
         actual_bookings = abm_stat['total_new_bookings']
         total_revenue = abm_stat['total_revenue']
         
+        # 保存ABM统计信息（用于博弈系统）
+        self.last_abm_stat = abm_stat
+        
         return actual_bookings, total_revenue
     
     def step(self, action: Union[int, List[int]]) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
@@ -368,8 +371,15 @@ class HotelEnvironment:
         # ✅ 支持两种动作类型：
         # 1. 离散动作（Q-learning）：动作索引 0-35
         # 2. 连续动作（Actor-Critic）：直接价格值 80-200
+        # 3. 博弈模式：[price_online, price_offline]
         
-        if isinstance(action, (list, np.ndarray)) and len(action) == 5:
+        if isinstance(action, (list, np.ndarray)) and len(action) == 2:
+            # 博弈模式：直接指定线上和线下价格
+            price_online, price_offline = action
+            price_windows_online = [float(price_online)] + self.current_price_window_online[1:]
+            price_windows_offline = [float(price_offline)] + self.current_price_window_offline[1:]
+            
+        elif isinstance(action, (list, np.ndarray)) and len(action) == 5:
             # 5个动作：分别对应5天
             actions_window = action
             price_windows_online = []
@@ -446,11 +456,24 @@ class HotelEnvironment:
         new_state = self._get_state()
         done = (self.day >= 365)
             
+        # 构建info字典，包含渠道级数据（用于博弈系统）
         info = {
-                'actual_bookings': actual_bookings,
-                'revenue': total_revenue,
-                'inventory_after': self.current_inventory
-            }
+            'actual_bookings': actual_bookings,
+            'revenue': total_revenue,
+            'inventory_after': self.current_inventory
+        }
+        
+        # 如果有ABM统计信息，添加渠道级数据
+        if hasattr(self, 'last_abm_stat') and self.last_abm_stat:
+            info.update({
+                'new_bookings_online': self.last_abm_stat.get('new_bookings_online', 0),
+                'new_bookings_offline': self.last_abm_stat.get('new_bookings_offline', 0),
+                'revenue_online': self.last_abm_stat.get('revenue_online', 0),
+                'revenue_offline': self.last_abm_stat.get('revenue_offline', 0),
+                'price_online': self.last_abm_stat.get('price_online', 0),
+                'price_offline': self.last_abm_stat.get('price_offline', 0),
+                'new_customers': self.last_abm_stat.get('new_customers', 0)
+            })
             
         return new_state, total_revenue, done, info
     
