@@ -80,10 +80,6 @@ class CustomerAgent(Agent):
         Returns:
             效用得分
         """
-        # 如果价格超过支付意愿，直接返回负无穷
-        if price > self.profile.wtp:
-            return -np.inf
-        
         # 经济盈余效用：(WTP - P) * β
         economic_surplus = (self.profile.wtp - price) * self.profile.price_sensitivity
         
@@ -101,12 +97,12 @@ class CustomerAgent(Agent):
         
         return utility
     
-    def make_booking_decision(self, price: float, current_day: int) -> bool:
+    def make_booking_decision(self, online_price: float, offline_price: float, current_day: int) -> bool:
         """
         做出预订决策
         
         Args:
-            price: 酒店报价
+            online_price: 线上渠道报价
             current_day: 当前日期
             
         Returns:
@@ -116,11 +112,23 @@ class CustomerAgent(Agent):
             return False
         
         # 计算效用
-        utility = self.evaluate_booking_utility(price, current_day)
+        online_utility = self.evaluate_booking_utility(online_price, current_day)
         
+        # 线下效用加入随机误差项，模拟线下渠道的不确定性和额外成本/便利性
+        offline_utility_base = self.evaluate_booking_utility(offline_price, current_day)
+        offline_noise = np.random.normal(0, 5)  # 均值0，标准差5的随机误差
+        offline_utility = offline_utility_base + offline_noise
         # 决策阈值
+        if offline_utility > online_utility:
+            utility = offline_utility
+            price = offline_price
+            self.profile.customer_type = 'offline'
+        else:
+            utility = online_utility
+            price = online_price
+            self.profile.customer_type = 'online'
+
         threshold = self.model.params.booking_threshold
-        
         # 做出决策
         if utility > threshold:
             self.has_booked = True
@@ -387,17 +395,19 @@ class HotelABMModel(Model):
             days_ahead = target_date - self.current_day  # 0, 1, 2, 3, 4
             
             # ✅ 根据客户的target_date从价格窗口中选择对应的价格
-            if 0 <= days_ahead < len(self.price_window_online):
-                if customer.profile.customer_type == 'online':
-                    price = self.price_window_online[days_ahead]
-                else:
-                    price = self.price_window_offline[days_ahead]
-            else:
-                # 超出预订窗口，跳过该客户
-                continue
-            
+            #if 0 <= days_ahead < len(self.price_window_online):
+            #    if customer.profile.customer_type == 'online':
+            #        price = self.price_window_online[days_ahead]
+            #    else:
+            #        price = self.price_window_offline[days_ahead]
+            #else:
+            #    # 超出预订窗口，跳过该客户
+            #    continue
+            online_price = self.price_window_online[days_ahead]
+            offline_price = self.price_window_offline[days_ahead]
+
             # 做出预订决策
-            if customer.make_booking_decision(price, self.current_day):
+            if customer.make_booking_decision(online_price, offline_price, self.current_day):
                 target_date = customer.booking_record.target_date
                 
                 # ✅ 正确的库存检查：检查目标日期的库存

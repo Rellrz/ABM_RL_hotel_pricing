@@ -13,6 +13,14 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "Debugger train_game.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/train_game.py",
+            "args": ["--episodes", "100"],
+            "console": "integratedTerminal"
+        },
+        {
             "type": "node-terminal",
             "name": "JavaScript 调试终端",
             "request": "launch",

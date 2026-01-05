@@ -386,8 +386,14 @@ class HotelEnvironment:
             price_windows_offline = []
             
             for act in actions_window:
+                # 检查是否是[price_online, price_offline]对（博弈模式）
+                if isinstance(act, (list, np.ndarray)) and len(act) == 2:
+                    # 博弈模式：直接指定线上和线下价格
+                    price_online, price_offline = act
+                    price_windows_online.append(float(price_online))
+                    price_windows_offline.append(float(price_offline))
                 # 判断是离散还是连续动作
-                if isinstance(act, (int, np.integer)) or (isinstance(act, (float, np.floating)) and act < 50):
+                elif isinstance(act, (int, np.integer)) or (isinstance(act, (float, np.floating)) and act < 50):
                     # 离散动作：动作索引 (0-35)
                     act_idx = int(act.item()) if hasattr(act, 'item') else int(act)
                     n_offline = len(offline_prices)

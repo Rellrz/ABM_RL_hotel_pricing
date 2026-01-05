@@ -68,10 +68,6 @@ def main() -> None:
                        help='ABM模式下的训练轮数（默认200）')
     parser.add_argument('--run-uuid', type=str, default=None,
                        help='运行UUID，用于Q表存储和识别')
-    # parser.add_argument('--simulate-days', type=int, default=90,
-    #                    help='模拟天数')
-    # parser.add_argument('--start-date', type=str, default='2017-01-01',
-    #                    help='模拟开始日期 (YYYY-MM-DD)')
     
     args = parser.parse_args()
     

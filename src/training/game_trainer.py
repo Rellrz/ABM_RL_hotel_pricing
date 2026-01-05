@@ -20,8 +20,9 @@ from src.agent.ota_agent import OTAAgent
 
 
 def train_game_system(historical_data: pd.DataFrame, 
-                     episodes: int = 100,
-                     training_mode: str = 'simultaneous') -> Tuple[HotelAgentDualChannel, OTAAgent, List, List, List]:
+                      episodes: int = 100,
+                      training_mode: str = 'simultaneous',
+                      update_frequency: int = 10) -> Tuple[HotelAgentDualChannel, OTAAgent, List, List, List]:
     """
     训练酒店-OTA博弈系统
     
@@ -103,67 +104,96 @@ def train_game_system(historical_data: pd.DataFrame,
         
         # 365天模拟
         for day in range(365):
-            # 1. 酒店决策线上基础价格和线下价格
-            action_hotel = hotel_agent.select_action(state, deterministic=False)
-            price_online_base, price_offline = action_hotel
+            # 1. 为未来5天构建状态窗口和决策
+            price_online_base_window = []
+            price_offline_window = []
+            subsidy_ratio_window = []
             
-            # 2. OTA决策补贴比例
-            if training_mode == 'fixed_ota':
-                # 固定OTA策略：基于价格差异的简单规则
-                price_gap = price_offline - price_online_base
-                if price_gap > 20:
-                    subsidy_ratio = 0.2  # 补贴佣金的20%
-                elif price_gap > 10:
-                    subsidy_ratio = 0.5  # 补贴佣金的50%
+            for day_offset in range(5):  # Day0, Day1, Day2, Day3, Day4
+                # 获取该天的状态
+                state_for_day = env._get_state_for_day_offset(day_offset)
+                
+                # 1.1 酒店决策该天的线上基础价格和线下价格
+                action_hotel = hotel_agent.select_action(state_for_day, deterministic=False)
+                price_online_base, price_offline = action_hotel
+                
+                # 1.2 OTA决策该天的补贴比例
+                if training_mode == 'fixed_ota':
+                    # 固定OTA策略：基于价格差异的简单规则
+                    price_gap = price_offline - price_online_base
+                    if price_gap > 20:
+                        subsidy_ratio = 0.2  # 补贴佣金的20%
+                    elif price_gap > 10:
+                        subsidy_ratio = 0.5  # 补贴佣金的50%
+                    else:
+                        subsidy_ratio = 0.7  # 补贴佣金的70%
                 else:
-                    subsidy_ratio = 0.7  # 补贴佣金的70%
-            else:
-                # 使用OTA Agent决策补贴比例
-                subsidy_ratio = ota_agent.select_action(
-                    price_online_base, price_offline, state, deterministic=False
-                )
+                    # 使用OTA Agent决策补贴比例
+                    subsidy_ratio = ota_agent.select_action(
+                        price_online_base, price_offline, state_for_day, deterministic=False
+                    )
+                
+                # 保存决策
+                price_online_base_window.append(price_online_base)
+                price_offline_window.append(price_offline)
+                subsidy_ratio_window.append(subsidy_ratio)
             
-            # 3. 计算补贴金额和最终线上价格
-            # 预估佣金收入（假设有预订）
-            estimated_commission = price_online_base * RL_CONFIG.commission_rate
-            # 补贴金额 = 佣金 * 补贴比例
-            subsidy_amount = estimated_commission * subsidy_ratio
-            # 最终线上价格
-            price_online_final = price_online_base - subsidy_amount
+            # 2. 计算5天的补贴金额和最终线上价格
+            price_online_final_window = []
+            subsidy_amount_window = []
             
-            # 4. 环境执行（传入最终价格）
-            # 注意：这里需要修改环境以支持5天窗口
-            # 简化版：只传入当天价格
-            next_state, reward, done, info = env.step([price_online_final, price_offline])
+            for i in range(5):
+                # 预估佣金收入（假设有预订）
+                estimated_commission = price_online_base_window[i] * RL_CONFIG.commission_rate
+                # 补贴金额 = 佣金 * 补贴比例
+                subsidy_amount = estimated_commission * subsidy_ratio_window[i]
+                # 最终线上价格
+                price_online_final = price_online_base_window[i] - subsidy_amount
+                
+                price_online_final_window.append(price_online_final)
+                subsidy_amount_window.append(subsidy_amount)
             
-            # 5. 计算各方收益
+            # 3. 环境执行（传入5天的价格窗口）
+            # 构建动作：5个[price_online_final, price_offline]对
+            actions_window = [[price_online_final_window[i], price_offline_window[i]] for i in range(5)]
+            next_state, reward, done, info = env.step(actions_window)
+            
+            # 4. 计算各方收益（使用今天的数据，即第0天）
             bookings_online = info.get('new_bookings_online', 0)
             bookings_offline = info.get('new_bookings_offline', 0)
+            
+            # 使用今天（第0天）的价格和补贴比例
+            price_online_base_today = price_online_base_window[0]
+            price_offline_today = price_offline_window[0]
+            subsidy_ratio_today = subsidy_ratio_window[0]
             
             # 酒店收益（扣除佣金）
             revenue_hotel = hotel_agent.calculate_revenue(
                 bookings_online, bookings_offline,
-                price_online_base, price_offline
+                price_online_base_today, price_offline_today
             )
             
             # OTA利润（基于补贴比例）
             profit_ota = ota_agent.calculate_profit(
-                bookings_online, price_online_base, subsidy_ratio
+                bookings_online, price_online_base_today, subsidy_ratio_today
             )
             
             # 计算实际补贴金额（用于统计）
-            actual_subsidy_amount = (bookings_online * price_online_base * 
-                                    RL_CONFIG.commission_rate * subsidy_ratio)
+            actual_subsidy_amount = (bookings_online * price_online_base_today * 
+                                    RL_CONFIG.commission_rate * subsidy_ratio_today)
             
-            # 6. 更新Agent
+            # 5. 更新Agent（使用今天的状态和动作）
+            state_today = env._get_state_for_day_offset(0)
+            action_hotel_today = np.array([price_online_base_today, price_offline_today])
+            
             # 更新酒店Agent（传入实际补贴金额用于学习）
-            hotel_agent.update(state, action_hotel, revenue_hotel, next_state, done, actual_subsidy_amount)
+            hotel_agent.update(state_today, action_hotel_today, revenue_hotel, next_state, done, actual_subsidy_amount)
             
             # 更新OTA Agent（除非是fixed_ota模式）
             if training_mode != 'fixed_ota':
                 ota_agent.update(
-                    price_online_base, price_offline, state,
-                    subsidy_ratio, profit_ota, next_state, done
+                    price_online_base_today, price_offline_today, state_today,
+                    subsidy_ratio_today, profit_ota, next_state, done
                 )
             
             # 累积统计
@@ -173,14 +203,24 @@ def train_game_system(historical_data: pd.DataFrame,
             total_bookings_offline += bookings_offline
             total_subsidy += actual_subsidy_amount
             
+            # 保存最后一天的补贴比例用于统计
+            last_subsidy_ratio = subsidy_ratio_today
+            
+            # 6. 定期更新CEM参数（每N天更新一次，而不是等到episode结束）
+            if (day + 1) % update_frequency == 0:
+                hotel_agent.end_episode()
+                if training_mode != 'fixed_ota':
+                    ota_agent.end_episode()
+            
             state = next_state
             if done:
                 break
         
-        # Episode结束
-        hotel_agent.end_episode()
-        if training_mode != 'fixed_ota':
-            ota_agent.end_episode()
+        # Episode结束时最后一次更新（如果最后几天没有触发更新）
+        if 365 % update_frequency != 0:
+            hotel_agent.end_episode()
+            if training_mode != 'fixed_ota':
+                ota_agent.end_episode()
         
         # 记录
         episode_rewards_hotel.append(total_reward_hotel)
@@ -193,7 +233,7 @@ def train_game_system(historical_data: pd.DataFrame,
             'bookings_offline': total_bookings_offline,
             'total_subsidy': total_subsidy,
             'avg_subsidy_amount': total_subsidy / max(1, total_bookings_online),
-            'avg_subsidy_ratio': subsidy_ratio  # 最后一天的补贴比例
+            'avg_subsidy_ratio': last_subsidy_ratio  # 最后一天的补贴比例
         })
         
         # 监控
@@ -286,14 +326,27 @@ def plot_game_results(episode_rewards_hotel: List[float],
     ax2.legend()
     ax2.grid(True, alpha=0.3)
     
-    # 3. 平均补贴
+    # 3. 平均补贴金额和比例
     ax3 = axes[1, 0]
-    avg_subsidy = [info['avg_subsidy'] for info in episode_info]
-    ax3.plot(avg_subsidy, color='orange', alpha=0.7)
+    avg_subsidy_amount = [info['avg_subsidy_amount'] for info in episode_info]
+    avg_subsidy_ratio = [info['avg_subsidy_ratio'] * 100 for info in episode_info]  # 转换为百分比
+    
+    ax3_twin = ax3.twinx()
+    line1 = ax3.plot(avg_subsidy_amount, color='orange', alpha=0.7, label='Subsidy Amount ($)')
+    line2 = ax3_twin.plot(avg_subsidy_ratio, color='purple', alpha=0.7, label='Subsidy Ratio (%)')
+    
     ax3.set_xlabel('Episode')
-    ax3.set_ylabel('Average Subsidy ($)')
+    ax3.set_ylabel('Average Subsidy Amount ($)', color='orange')
+    ax3_twin.set_ylabel('Subsidy Ratio (%)', color='purple')
     ax3.set_title('OTA Subsidy Strategy')
+    ax3.tick_params(axis='y', labelcolor='orange')
+    ax3_twin.tick_params(axis='y', labelcolor='purple')
     ax3.grid(True, alpha=0.3)
+    
+    # 合并图例
+    lines = line1 + line2
+    labels = [l.get_label() for l in lines]
+    ax3.legend(lines, labels, loc='upper right')
     
     # 4. 渠道收益占比
     ax4 = axes[1, 1]

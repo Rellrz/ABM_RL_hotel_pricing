@@ -205,11 +205,11 @@ class RLConfig:
     action_max: float = 170.0  # 最高价格
     initial_std: float = 20.0  # 初始探索标准差
     min_std: float = 5.0  # 最小探索标准差 - 极小值减少后期波动
-    std_decay: float = 0.995  # 标准差衰减率 - 持续衰减到500轮（0.99）
+    std_decay: float = 0.999  # 标准差衰减率 - 持续衰减到500轮（0.99）
     
     # ========== CEM参数 ==========
-    cem_n_samples: int = 20  # CEM每次采样的动作数量
-    cem_elite_frac: float = 0.2  # CEM精英样本比例（top-k）
+    cem_n_samples: int = 100  # CEM每次采样的动作数量
+    cem_elite_frac: float = 0.4  # CEM精英样本比例（top-k）
     
     # ========== 博弈系统参数 ==========
     enable_game_mode: bool = False  # 是否启用酒店-OTA博弈模式

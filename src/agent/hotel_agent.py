@@ -18,6 +18,7 @@ from src.algorithms.q_learning import QLearning
 from src.algorithms.actor_critic import TabularActorCritic
 from src.algorithms.linear_sarsa import LinearSARSA
 from src.algorithms.cem import CrossEntropyMethod
+from src.algorithms.cem_nn import NeuralCrossEntropyMethod
 
 class HotelAgent:
     """
@@ -27,14 +28,16 @@ class HotelAgent:
     1. Q-learning: 离散动作空间（144个定价组合）
     2. Actor-Critic: 连续动作空间（价格80-170元）
     3. Linear SARSA: 连续动作空间（线性函数逼近）
-    4. CEM: 连续动作空间（交叉熵方法）
+    4. CEM: 连续动作空间（交叉熵方法，表格版本）
+    5. CEM-NN: 连续动作空间（交叉熵方法，神经网络版本）
     
     算法切换：
     - 通过配置文件中的 RL_CONFIG.algorithm 参数选择
     - 'q_learning': 使用Q-learning算法
     - 'actor_critic': 使用Actor-Critic算法
     - 'linear_sarsa': 使用线性SARSA算法
-    - 'cem': 使用交叉熵方法
+    - 'cem': 使用交叉熵方法（表格版本）
+    - 'cem_nn': 使用交叉熵方法（神经网络版本）
     
     状态空间：
     - 总状态数：30（库存等级5 × 季节3 × 日期类型2）
@@ -111,7 +114,7 @@ class HotelAgent:
             )
             
         elif self.algorithm_type == 'cem':
-            print(f"✅ 使用 CEM 算法（连续动作空间 + 交叉熵方法）")
+            print(f"✅ 使用 CEM 算法（连续动作空间 + 交叉熵方法，表格版本）")
             self.epsilon_start = 0.0  # CEM不使用epsilon
             self.epsilon_end = 0.0
             self.epsilon_decay_steps = 1
@@ -126,6 +129,28 @@ class HotelAgent:
                 initial_std=RL_CONFIG.initial_std,
                 min_std=RL_CONFIG.min_std,
                 std_decay=RL_CONFIG.std_decay
+            )
+            
+        elif self.algorithm_type == 'cem_nn':
+            print(f"✅ 使用 CEM-NN 算法（连续动作空间 + 交叉熵方法，神经网络版本）")
+            self.epsilon_start = 0.0  # CEM不使用epsilon
+            self.epsilon_end = 0.0
+            self.epsilon_decay_steps = 1
+            
+            self.algorithm = NeuralCrossEntropyMethod(
+                state_dim=self.n_states,
+                action_dim=1,
+                action_min=RL_CONFIG.action_min,
+                action_max=RL_CONFIG.action_max,
+                discount_factor=self.discount_factor,
+                n_samples=RL_CONFIG.cem_n_samples if hasattr(RL_CONFIG, 'cem_n_samples') else 20,
+                elite_frac=RL_CONFIG.cem_elite_frac if hasattr(RL_CONFIG, 'cem_elite_frac') else 0.2,
+                learning_rate=RL_CONFIG.learning_rate if hasattr(RL_CONFIG, 'learning_rate') else 0.001,
+                hidden_dims=[64, 64],
+                batch_size=32,
+                memory_size=1000,
+                min_std=RL_CONFIG.min_std,
+                device='cpu'
             )
         else:
             raise ValueError(f"不支持的算法类型: {self.algorithm_type}")
@@ -147,6 +172,9 @@ class HotelAgent:
             return {}
         elif self.algorithm_type == 'cem':
             # CEM使用action_dist，返回一个空字典以兼容
+            return {}
+        elif self.algorithm_type == 'cem_nn':
+            # CEM-NN使用神经网络，返回一个空字典以兼容
             return {}
         else:
             return {}
@@ -170,8 +198,8 @@ class HotelAgent:
         if self.algorithm_type in ['actor_critic', 'linear_sarsa']:
             # Actor-Critic和Linear SARSA使用ε-greedy，直接返回current_epsilon
             return self.algorithm.current_epsilon
-        elif self.algorithm_type == 'cem':
-            # CEM不使用epsilon
+        elif self.algorithm_type in ['cem', 'cem_nn']:
+            # CEM和CEM-NN不使用epsilon
             return 0.0
         else:
             # Q-learning使用epsilon-greedy
@@ -199,7 +227,7 @@ class HotelAgent:
             float: 连续动作算法返回连续价格值 (80-170)
         """
         # 连续动作算法：直接委托给算法的select_action方法
-        if self.algorithm_type in ['actor_critic', 'linear_sarsa', 'cem']:
+        if self.algorithm_type in ['actor_critic', 'linear_sarsa', 'cem', 'cem_nn']:
             return self.algorithm.select_action(state, deterministic=False)
         elif self.algorithm_type == 'q_learning':
             return self.algorithm.select_action(state, episode)
@@ -214,7 +242,7 @@ class HotelAgent:
     
     def end_episode(self):
         """结束episode，更新相关参数"""
-        if self.algorithm_type in ['actor_critic', 'linear_sarsa', 'cem']:
+        if self.algorithm_type in ['actor_critic', 'linear_sarsa', 'cem', 'cem_nn']:
             self.algorithm.end_episode()
     
     def get_policy(self) -> Dict[Any, Union[int, float]]:

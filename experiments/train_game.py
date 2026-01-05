@@ -23,12 +23,13 @@ def main():
     parser = argparse.ArgumentParser(description='训练酒店-OTA博弈系统')
     parser.add_argument('--data', type=str, default='datasets/hotel_bookings.csv',
                        help='酒店预订数据文件路径')
-    parser.add_argument('--episodes', type=int, default=100, help='训练轮数')
+    parser.add_argument('--episodes', type=int, default=500, help='训练轮数')
     parser.add_argument('--mode', type=str, default='simultaneous', 
                        choices=['fixed_ota', 'alternating', 'simultaneous'],
                        help='训练模式')
     parser.add_argument('--commission', type=float, default=0.15, help='OTA佣金率')
     parser.add_argument('--subsidy-ratio-max', type=float, default=0.8, help='最大补贴比例（占佣金的百分比）')
+    parser.add_argument('--update-frequency', type=int, default=30, help='CEM参数更新频率（每N天更新一次）')
     
     args = parser.parse_args()
     
@@ -39,6 +40,7 @@ def main():
     print(f"训练模式: {args.mode}")
     print(f"佣金率: {args.commission * 100:.1f}%")
     print(f"补贴比例范围: 0%-{args.subsidy_ratio_max * 100:.0f}%")
+    print(f"CEM更新频率: 每{args.update_frequency}天更新一次")
     
     # 更新配置
     RL_CONFIG.commission_rate = args.commission
@@ -54,7 +56,8 @@ def main():
     hotel_agent, ota_agent, rewards_hotel, rewards_ota, episode_info = train_game_system(
         historical_data=historical_data,
         episodes=args.episodes,
-        training_mode=args.mode
+        training_mode=args.mode,
+        update_frequency=args.update_frequency
     )
     
     # 保存结果
