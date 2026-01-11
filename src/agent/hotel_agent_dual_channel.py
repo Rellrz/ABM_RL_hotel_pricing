@@ -15,6 +15,8 @@ import numpy as np
 from collections import defaultdict, deque
 from typing import Union, List, Dict, Any, Tuple
 from src.algorithms.cem import CrossEntropyMethod
+from src.algorithms.cem_nn import NeuralCrossEntropyMethod
+from configs.config import RL_CONFIG
 
 
 class HotelAgentDualChannel:
@@ -71,32 +73,65 @@ class HotelAgentDualChannel:
         self.online_price_max = online_price_max
         self.offline_price_min = offline_price_min
         self.offline_price_max = offline_price_max
+        self.algorithm_type = RL_CONFIG.cem_algorithm
         
-        # 线上价格CEM（考虑佣金，价格范围更高）
-        self.cem_online = CrossEntropyMethod(
-            n_states=n_states,
-            action_min=online_price_min,
-            action_max=online_price_max,
-            discount_factor=0.99,
-            n_samples=n_samples,
-            elite_frac=elite_frac,
-            initial_std=initial_std,
-            min_std=min_std,
-            std_decay=std_decay
-        )
-        
-        # 线下价格CEM
-        self.cem_offline = CrossEntropyMethod(
-            n_states=n_states,
-            action_min=offline_price_min,
-            action_max=offline_price_max,
-            discount_factor=0.99,
-            n_samples=n_samples,
-            elite_frac=elite_frac,
-            initial_std=initial_std,
-            min_std=min_std,
-            std_decay=std_decay
-        )
+        # 根据配置选择算法
+        if self.algorithm_type == 'cem_nn':
+            # 使用神经网络版CEM
+            self.cem_online = NeuralCrossEntropyMethod(
+                state_dim=RL_CONFIG.cem_nn_state_dim,
+                action_dim=1,
+                action_min=online_price_min,
+                action_max=online_price_max,
+                discount_factor=0.99,
+                n_samples=n_samples,
+                elite_frac=elite_frac,
+                learning_rate=RL_CONFIG.cem_nn_learning_rate,
+                hidden_dims=RL_CONFIG.cem_nn_hidden_dims,
+                batch_size=RL_CONFIG.cem_nn_batch_size,
+                memory_size=RL_CONFIG.cem_nn_memory_size,
+                min_std=min_std
+            )
+            
+            self.cem_offline = NeuralCrossEntropyMethod(
+                state_dim=RL_CONFIG.cem_nn_state_dim,
+                action_dim=1,
+                action_min=offline_price_min,
+                action_max=offline_price_max,
+                discount_factor=0.99,
+                n_samples=n_samples,
+                elite_frac=elite_frac,
+                learning_rate=RL_CONFIG.cem_nn_learning_rate,
+                hidden_dims=RL_CONFIG.cem_nn_hidden_dims,
+                batch_size=RL_CONFIG.cem_nn_batch_size,
+                memory_size=RL_CONFIG.cem_nn_memory_size,
+                min_std=min_std
+            )
+        else:
+            # 使用传统表格版CEM
+            self.cem_online = CrossEntropyMethod(
+                n_states=n_states,
+                action_min=online_price_min,
+                action_max=online_price_max,
+                discount_factor=0.99,
+                n_samples=n_samples,
+                elite_frac=elite_frac,
+                initial_std=initial_std,
+                min_std=min_std,
+                std_decay=std_decay
+            )
+            
+            self.cem_offline = CrossEntropyMethod(
+                n_states=n_states,
+                action_min=offline_price_min,
+                action_max=offline_price_max,
+                discount_factor=0.99,
+                n_samples=n_samples,
+                elite_frac=elite_frac,
+                initial_std=initial_std,
+                min_std=min_std,
+                std_decay=std_decay
+            )
         
         # OTA补贴历史（用于预测OTA行为）
         self.ota_subsidy_history = deque(maxlen=30)
@@ -292,15 +327,23 @@ class HotelAgentDualChannel:
         Returns:
             探索率（标准差的归一化值）
         """
-        # 获取两个CEM的平均标准差
-        std_online = np.mean([std for std in self.cem_online.std_table.values()]) if self.cem_online.std_table else self.cem_online.initial_std
-        std_offline = np.mean([std for std in self.cem_offline.std_table.values()]) if self.cem_offline.std_table else self.cem_offline.initial_std
-        avg_std = (std_online + std_offline) / 2.0
-        
-        # 归一化到0-1范围
-        normalized_std = avg_std / self.cem_online.initial_std
-        
-        return normalized_std
+        if self.algorithm_type == 'cem_nn':
+            # CEM-NN: 使用episode进行衰减估计
+            initial_explore = 0.5
+            min_explore = 0.1
+            decay_rate = 0.995
+            exploration_rate = max(min_explore, initial_explore * (decay_rate ** episode))
+            return exploration_rate
+        else:
+            # 传统CEM: 使用标准差表
+            std_online = np.mean([std for std in self.cem_online.std_table.values()]) if self.cem_online.std_table else self.cem_online.initial_std
+            std_offline = np.mean([std for std in self.cem_offline.std_table.values()]) if self.cem_offline.std_table else self.cem_offline.initial_std
+            avg_std = (std_online + std_offline) / 2.0
+            
+            # 归一化到0-1范围
+            normalized_std = avg_std / self.cem_online.initial_std
+            
+            return normalized_std
     
     def get_statistics(self) -> Dict[str, float]:
         """

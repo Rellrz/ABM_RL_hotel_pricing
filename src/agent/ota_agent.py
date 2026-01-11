@@ -15,6 +15,8 @@ import numpy as np
 from collections import defaultdict, deque
 from typing import Union, List, Dict, Any
 from src.algorithms.cem import CrossEntropyMethod
+from src.algorithms.cem_nn import NeuralCrossEntropyMethod
+from configs.config import RL_CONFIG
 
 
 class OTAAgent:
@@ -66,19 +68,38 @@ class OTAAgent:
         self.subsidy_ratio_min = subsidy_ratio_min
         self.subsidy_ratio_max = subsidy_ratio_max
         self.n_states = n_states
+        self.algorithm_type = RL_CONFIG.cem_algorithm
         
-        # CEM算法用于决策补贴比例
-        self.cem = CrossEntropyMethod(
-            n_states=n_states,
-            action_min=subsidy_ratio_min,
-            action_max=subsidy_ratio_max,
-            discount_factor=0.99,
-            n_samples=n_samples,
-            elite_frac=elite_frac,
-            initial_std=initial_std,
-            min_std=min_std,
-            std_decay=std_decay
-        )
+        # 根据配置选择算法
+        if self.algorithm_type == 'cem_nn':
+            # 使用神经网络版CEM（针对补贴比例的小范围，使用更小的min_std）
+            self.cem = NeuralCrossEntropyMethod(
+                state_dim=RL_CONFIG.cem_nn_state_dim,
+                action_dim=1,
+                action_min=subsidy_ratio_min,
+                action_max=subsidy_ratio_max,
+                discount_factor=0.99,
+                n_samples=n_samples,
+                elite_frac=elite_frac,
+                learning_rate=RL_CONFIG.cem_nn_learning_rate,
+                hidden_dims=RL_CONFIG.cem_nn_hidden_dims,
+                batch_size=RL_CONFIG.cem_nn_batch_size,
+                memory_size=RL_CONFIG.cem_nn_memory_size,
+                min_std=RL_CONFIG.cem_nn_min_std  # 使用配置的小标准差
+            )
+        else:
+            # 使用传统表格版CEM
+            self.cem = CrossEntropyMethod(
+                n_states=n_states,
+                action_min=subsidy_ratio_min,
+                action_max=subsidy_ratio_max,
+                discount_factor=0.99,
+                n_samples=n_samples,
+                elite_frac=elite_frac,
+                initial_std=initial_std,
+                min_std=min_std,
+                std_decay=std_decay
+            )
         
         # 统计信息
         self.total_profit = 0.0

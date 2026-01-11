@@ -208,8 +208,17 @@ class RLConfig:
     std_decay: float = 0.999  # 标准差衰减率 - 持续衰减到500轮（0.99）
     
     # ========== CEM参数 ==========
+    cem_algorithm: str = 'cem'  # 'cem' (表格版) 或 'cem_nn' (神经网络版)
     cem_n_samples: int = 100  # CEM每次采样的动作数量
     cem_elite_frac: float = 0.4  # CEM精英样本比例（top-k）
+    
+    # ========== CEM-NN参数 ==========
+    cem_nn_state_dim: int = 18  # 状态维度
+    cem_nn_learning_rate: float = 0.001  # 学习率
+    cem_nn_batch_size: int = 32  # 批次大小
+    cem_nn_memory_size: int = 1000  # 经验回放大小
+    cem_nn_hidden_dims: list = field(default_factory=lambda: [64, 64])  # 隐藏层维度
+    cem_nn_min_std: float = 0.05  # 最小标准差（针对补贴比例0-0.8的小范围）
     
     # ========== 博弈系统参数 ==========
     enable_game_mode: bool = False  # 是否启用酒店-OTA博弈模式

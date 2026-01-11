@@ -90,8 +90,9 @@ def train_game_system(historical_data: pd.DataFrame,
     monitor = get_training_monitor()
     
     print("\n开始训练...")
-    print(f"✅ 酒店Agent: 双CEM（线上基础价格 + 线下价格）")
-    print(f"✅ OTA Agent: CEM（补贴决策）")
+    algorithm_name = "CEM-NN (神经网络)" if RL_CONFIG.cem_algorithm == 'cem_nn' else "CEM (表格版)"
+    print(f"✅ 酒店Agent: 双{algorithm_name}（线上基础价格 + 线下价格）")
+    print(f"✅ OTA Agent: {algorithm_name}（补贴决策）")
     
     for episode in range(episodes):
         state = env.reset()
