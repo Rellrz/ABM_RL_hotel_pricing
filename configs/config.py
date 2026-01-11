@@ -21,6 +21,7 @@ class PathConfig:
     models_dir: str = os.path.join(PROJECT_ROOT, 'outputs', 'models')
     results_dir: str = os.path.join(PROJECT_ROOT, 'outputs', 'results')
     figures_dir: str = os.path.join(PROJECT_ROOT, 'outputs', 'figures')
+    tensorboard_dir: str = os.path.join(PROJECT_ROOT, 'outputs', 'tensorboard_logs')
     
     # 模型保存路径
     abm_q_table_path: str = os.path.join(PROJECT_ROOT, 'outputs', 'models', 'abm_q_table_{timestamp}.pkl')

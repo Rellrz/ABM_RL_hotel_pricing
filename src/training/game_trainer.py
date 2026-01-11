@@ -12,8 +12,10 @@ import numpy as np
 import pandas as pd
 from typing import Tuple, List, Dict
 from datetime import datetime
+import os
+from tensorboardX import SummaryWriter
 
-from configs.config import RL_CONFIG, ENV_CONFIG
+from configs.config import RL_CONFIG, ENV_CONFIG, PATH_CONFIG
 from src.environment.hotel_env import HotelEnvironment
 from src.agent.hotel_agent_dual_channel import HotelAgentDualChannel
 from src.agent.ota_agent import OTAAgent
@@ -89,10 +91,18 @@ def train_game_system(historical_data: pd.DataFrame,
     from src.utils.training_monitor import get_training_monitor
     monitor = get_training_monitor()
     
+    # 初始化TensorBoard
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    algorithm_suffix = "cem_nn" if RL_CONFIG.cem_algorithm == 'cem_nn' else "cem"
+    log_dir = os.path.join(PATH_CONFIG.tensorboard_dir, f'game_{algorithm_suffix}_{timestamp}')
+    writer = SummaryWriter(log_dir=log_dir)
+    
     print("\n开始训练...")
     algorithm_name = "CEM-NN (神经网络)" if RL_CONFIG.cem_algorithm == 'cem_nn' else "CEM (表格版)"
     print(f"✅ 酒店Agent: 双{algorithm_name}（线上基础价格 + 线下价格）")
     print(f"✅ OTA Agent: {algorithm_name}（补贴决策）")
+    print(f"📊 TensorBoard日志: {log_dir}")
+    print(f"💡 查看训练曲线: tensorboard --logdir={PATH_CONFIG.tensorboard_dir}")
     
     for episode in range(episodes):
         state = env.reset()
@@ -247,6 +257,19 @@ def train_game_system(historical_data: pd.DataFrame,
             q_stats=None
         )
         
+        # TensorBoard记录
+        writer.add_scalar('Reward/Hotel_Revenue', total_reward_hotel, episode)
+        writer.add_scalar('Reward/OTA_Profit', total_reward_ota, episode)
+        writer.add_scalar('Reward/Total_Revenue', total_reward_hotel + total_reward_ota, episode)
+        writer.add_scalar('Bookings/Online', total_bookings_online, episode)
+        writer.add_scalar('Bookings/Offline', total_bookings_offline, episode)
+        writer.add_scalar('Bookings/Total', total_bookings_online + total_bookings_offline, episode)
+        writer.add_scalar('Bookings/Online_Ratio', total_bookings_online / max(1, total_bookings_online + total_bookings_offline), episode)
+        writer.add_scalar('Subsidy/Total_Amount', total_subsidy, episode)
+        writer.add_scalar('Subsidy/Avg_Amount_Per_Booking', total_subsidy / max(1, total_bookings_online), episode)
+        writer.add_scalar('Subsidy/Avg_Ratio', last_subsidy_ratio, episode)
+        writer.add_scalar('Training/Exploration_Rate', exploration_rate, episode)
+        
         # 打印进度
         if (episode + 1) % 10 == 0:
             avg_hotel = np.mean(episode_rewards_hotel[-10:])
@@ -284,6 +307,11 @@ def train_game_system(historical_data: pd.DataFrame,
     print(f"  总补贴支出: ${ota_stats['total_subsidy_cost']:.2f}")
     print(f"  补贴率: {ota_stats['subsidy_ratio']*100:.1f}%")
     print(f"  平均每轮利润: ${ota_stats['avg_profit_per_episode']:.2f}")
+    
+    # 关闭TensorBoard writer
+    writer.close()
+    print(f"\n📊 TensorBoard日志已保存: {log_dir}")
+    print(f"💡 查看训练曲线: tensorboard --logdir={PATH_CONFIG.tensorboard_dir}")
     
     return hotel_agent, ota_agent, episode_rewards_hotel, episode_rewards_ota, episode_info
 
