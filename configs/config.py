@@ -219,7 +219,8 @@ class RLConfig:
     cem_nn_batch_size: int = 32  # 批次大小
     cem_nn_memory_size: int = 1000  # 经验回放大小
     cem_nn_hidden_dims: list = field(default_factory=lambda: [64, 64])  # 隐藏层维度
-    cem_nn_min_std: float = 0.05  # 最小标准差（针对补贴比例0-0.8的小范围）
+    cem_nn_min_std: float = 0.02  # 最小标准差（降低以减少补贴波动，0.02/0.8=2.5%相对标准差）
+    cem_nn_initial_std: float = 0.1  # 初始标准差（从较小的值开始）
     
     # ========== 博弈系统参数 ==========
     enable_game_mode: bool = False  # 是否启用酒店-OTA博弈模式

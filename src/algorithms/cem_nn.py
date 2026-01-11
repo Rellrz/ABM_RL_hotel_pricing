@@ -124,6 +124,7 @@ class NeuralCrossEntropyMethod(BaseRLAlgorithm):
                  batch_size: int = 32,
                  memory_size: int = 1000,
                  min_std: float = 2.0,
+                 initial_std: float = None,
                  device: str = 'cpu'):
         """
         初始化CEM-NN算法
@@ -141,6 +142,7 @@ class NeuralCrossEntropyMethod(BaseRLAlgorithm):
             batch_size: 批次大小
             memory_size: 经验回放大小
             min_std: 最小标准差
+            initial_std: 初始标准差（如果为None，则使用min_std*5）
             device: 计算设备
         """
         self.state_dim = state_dim
@@ -153,6 +155,7 @@ class NeuralCrossEntropyMethod(BaseRLAlgorithm):
         self.batch_size = batch_size
         self.memory_size = memory_size
         self.min_std = min_std
+        self.initial_std = initial_std if initial_std is not None else min_std * 5
         self.device = torch.device(device)
         
         # 初始化策略网络

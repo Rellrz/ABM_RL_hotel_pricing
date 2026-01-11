@@ -72,7 +72,8 @@ class OTAAgent:
         
         # 根据配置选择算法
         if self.algorithm_type == 'cem_nn':
-            # 使用神经网络版CEM（针对补贴比例的小范围，使用更小的min_std）
+            # 使用神经网络版CEM（针对补贴比例的小范围，使用更小的标准差）
+            # 补贴范围0-0.8，使用initial_std=0.1, min_std=0.02来控制波动
             self.cem = NeuralCrossEntropyMethod(
                 state_dim=RL_CONFIG.cem_nn_state_dim,
                 action_dim=1,
@@ -85,7 +86,8 @@ class OTAAgent:
                 hidden_dims=RL_CONFIG.cem_nn_hidden_dims,
                 batch_size=RL_CONFIG.cem_nn_batch_size,
                 memory_size=RL_CONFIG.cem_nn_memory_size,
-                min_std=RL_CONFIG.cem_nn_min_std  # 使用配置的小标准差
+                min_std=RL_CONFIG.cem_nn_min_std,
+                initial_std=RL_CONFIG.cem_nn_initial_std  # 使用较小的初始标准差
             )
         else:
             # 使用传统表格版CEM
@@ -134,21 +136,25 @@ class OTAAgent:
         weekday = int(env_state.get('weekday', 0))
         
         # 特征1：价格差异（关键特征）
-        price_gap = hotel_price_offline - hotel_price_online
+        # 正常情况：线上基础价格 > 线下价格（因为要覆盖佣金）
+        # OTA需要通过补贴来降低最终线上价格，使其有竞争力
+        price_gap = hotel_price_online - hotel_price_offline
         if price_gap < 0:
-            price_gap_level = 0  # 线上基础价格更高（异常）
-        elif price_gap < 10:
-            price_gap_level = 1  # 价差小，需要大补贴
-        elif price_gap < 20:
-            price_gap_level = 2  # 价差中等
+            price_gap_level = 0  # 线上基础价格更低（异常情况，几乎不补贴）
+        elif price_gap < 5:
+            price_gap_level = 1  # 价差很小，少补贴
+        elif price_gap < 15:
+            price_gap_level = 2  # 价差小，中等补贴
+        elif price_gap < 25:
+            price_gap_level = 3  # 价差中等，较多补贴
         else:
-            price_gap_level = 3  # 价差大，可少补贴
+            price_gap_level = 4  # 价差大，需要大补贴才能吸引客户
         
         # 特征2：库存水平（0-4档）
         inventory_level = min(4, int(inventory / 20))
         
         # 组合状态索引
-        # 状态空间 = 4(price_gap) × 5(inventory) × 3(season) × 2(weekday) = 120
+        # 状态空间 = 5(price_gap) × 5(inventory) × 3(season) × 2(weekday) = 150
         state_idx = (price_gap_level * 5 * 3 * 2 + 
                     inventory_level * 3 * 2 + 
                     season * 2 + 

@@ -78,6 +78,7 @@ class HotelAgentDualChannel:
         # 根据配置选择算法
         if self.algorithm_type == 'cem_nn':
             # 使用神经网络版CEM
+            # 价格范围较大(90-180)，可以使用较大的initial_std
             self.cem_online = NeuralCrossEntropyMethod(
                 state_dim=RL_CONFIG.cem_nn_state_dim,
                 action_dim=1,
@@ -90,7 +91,8 @@ class HotelAgentDualChannel:
                 hidden_dims=RL_CONFIG.cem_nn_hidden_dims,
                 batch_size=RL_CONFIG.cem_nn_batch_size,
                 memory_size=RL_CONFIG.cem_nn_memory_size,
-                min_std=min_std
+                min_std=min_std,
+                initial_std=initial_std  # 使用传入的初始标准差
             )
             
             self.cem_offline = NeuralCrossEntropyMethod(
@@ -105,7 +107,8 @@ class HotelAgentDualChannel:
                 hidden_dims=RL_CONFIG.cem_nn_hidden_dims,
                 batch_size=RL_CONFIG.cem_nn_batch_size,
                 memory_size=RL_CONFIG.cem_nn_memory_size,
-                min_std=min_std
+                min_std=min_std,
+                initial_std=initial_std  # 使用传入的初始标准差
             )
         else:
             # 使用传统表格版CEM

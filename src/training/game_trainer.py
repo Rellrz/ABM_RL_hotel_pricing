@@ -217,12 +217,6 @@ def train_game_system(historical_data: pd.DataFrame,
             # 保存最后一天的补贴比例用于统计
             last_subsidy_ratio = subsidy_ratio_today
             
-            # 6. 定期更新CEM参数（每N天更新一次，而不是等到episode结束）
-            if (day + 1) % update_frequency == 0:
-                hotel_agent.end_episode()
-                if training_mode != 'fixed_ota':
-                    ota_agent.end_episode()
-            
             state = next_state
             if done:
                 break
