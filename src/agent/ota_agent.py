@@ -131,7 +131,8 @@ class OTAAgent:
             state_idx: 离散化的状态索引
         """
         # 提取环境状态
-        inventory = env_state.get('inventory', [100])[0] if isinstance(env_state.get('inventory'), list) else env_state.get('inventory', 100)
+        # 直接使用环境已经离散化好的inventory_level（0-2）
+        inventory_level = env_state.get('inventory_level', 2)
         season = env_state.get('season', 0)
         weekday = int(env_state.get('weekday', 0))
         
@@ -150,12 +151,11 @@ class OTAAgent:
         else:
             price_gap_level = 4  # 价差大，需要大补贴才能吸引客户
         
-        # 特征2：库存水平（0-4档）
-        inventory_level = min(4, int(inventory / 20))
+
         
         # 组合状态索引
-        # 状态空间 = 5(price_gap) × 5(inventory) × 3(season) × 2(weekday) = 150
-        state_idx = (price_gap_level * 5 * 3 * 2 + 
+        # 状态空间 = 5(price_gap) × 3(inventory) × 3(season) × 2(weekday) = 90
+        state_idx = (price_gap_level * 3 * 3 * 2 + 
                     inventory_level * 3 * 2 + 
                     season * 2 + 
                     weekday)

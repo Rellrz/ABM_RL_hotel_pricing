@@ -74,7 +74,7 @@ def train_game_system(historical_data: pd.DataFrame,
         commission_rate=RL_CONFIG.commission_rate,
         subsidy_ratio_min=RL_CONFIG.subsidy_ratio_min,
         subsidy_ratio_max=RL_CONFIG.subsidy_ratio_max,
-        n_states=120,  # OTA状态空间更大
+        n_states=90,  # OTA状态空间：5(price_gap) × 3(inventory) × 3(season) × 2(weekday) = 90
         n_samples=RL_CONFIG.cem_n_samples,
         elite_frac=RL_CONFIG.cem_elite_frac,
         initial_std=0.2,
@@ -169,53 +169,74 @@ def train_game_system(historical_data: pd.DataFrame,
             actions_window = [[price_online_final_window[i], price_offline_window[i]] for i in range(5)]
             next_state, reward, done, info = env.step(actions_window)
             
-            # 4. 计算各方收益（使用今天的数据，即第0天）
-            bookings_online = info.get('new_bookings_online', 0)
-            bookings_offline = info.get('new_bookings_offline', 0)
+            # 4. 获取按day_offset分组的预订信息
+            bookings_by_day_offset = info.get('bookings_by_day_offset', [])
             
-            # 使用今天（第0天）的价格和补贴比例
-            price_online_base_today = price_online_base_window[0]
-            price_offline_today = price_offline_window[0]
-            subsidy_ratio_today = subsidy_ratio_window[0]
-            
-            # 酒店收益（扣除佣金）
-            revenue_hotel = hotel_agent.calculate_revenue(
-                bookings_online, bookings_offline,
-                price_online_base_today, price_offline_today
-            )
-            
-            # OTA利润（基于补贴比例）
-            profit_ota = ota_agent.calculate_profit(
-                bookings_online, price_online_base_today, subsidy_ratio_today
-            )
-            
-            # 计算实际补贴金额（用于统计）
-            actual_subsidy_amount = (bookings_online * price_online_base_today * 
-                                    RL_CONFIG.commission_rate * subsidy_ratio_today)
-            
-            # 5. 更新Agent（使用今天的状态和动作）
-            state_today = env._get_state_for_day_offset(0)
-            action_hotel_today = np.array([price_online_base_today, price_offline_today])
-            
-            # 更新酒店Agent（传入实际补贴金额用于学习）
-            hotel_agent.update(state_today, action_hotel_today, revenue_hotel, next_state, done, actual_subsidy_amount)
-            
-            # 更新OTA Agent（除非是fixed_ota模式）
-            if training_mode != 'fixed_ota':
-                ota_agent.update(
-                    price_online_base_today, price_offline_today, state_today,
-                    subsidy_ratio_today, profit_ota, next_state, done
+            # 5. 对每个day_offset进行独立更新（每个仿真天更新5次）
+            for day_offset in range(5):
+                # 提取该day_offset的数据
+                if day_offset < len(bookings_by_day_offset):
+                    booking_info = bookings_by_day_offset[day_offset]
+                    bookings_online = booking_info['bookings_online']
+                    bookings_offline = booking_info['bookings_offline']
+                else:
+                    # 如果没有该day_offset的数据，跳过
+                    continue
+                
+                # 该day_offset的状态、价格和补贴比例
+                state_for_day = env._get_state_for_day_offset(day_offset)
+                price_online_base = price_online_base_window[day_offset]
+                price_offline = price_offline_window[day_offset]
+                subsidy_ratio = subsidy_ratio_window[day_offset]
+                
+                # 计算该day_offset的收益
+                revenue_hotel = hotel_agent.calculate_revenue(
+                    bookings_online, bookings_offline,
+                    price_online_base, price_offline
                 )
+                
+                profit_ota = ota_agent.calculate_profit(
+                    bookings_online, price_online_base, subsidy_ratio
+                )
+                
+                # 计算实际补贴金额
+                actual_subsidy_amount = (bookings_online * price_online_base * 
+                                        RL_CONFIG.commission_rate * subsidy_ratio)
+                
+                # 更新酒店Agent
+                action_hotel = np.array([price_online_base, price_offline])
+                hotel_agent.update(state_for_day, action_hotel, revenue_hotel, next_state, done, actual_subsidy_amount)
+                
+                # 更新OTA Agent（除非是fixed_ota模式）
+                if training_mode != 'fixed_ota':
+                    ota_agent.update(
+                        price_online_base, price_offline, state_for_day,
+                        subsidy_ratio, profit_ota, next_state, done
+                    )
             
-            # 累积统计
-            total_reward_hotel += revenue_hotel
-            total_reward_ota += profit_ota
-            total_bookings_online += bookings_online
-            total_bookings_offline += bookings_offline
-            total_subsidy += actual_subsidy_amount
+            # 6. 累积统计（使用总预订量）
+            total_bookings_online_day = info.get('new_bookings_online', 0)
+            total_bookings_offline_day = info.get('new_bookings_offline', 0)
+            
+            # 计算当天总收益（用于显示）
+            revenue_hotel_day = hotel_agent.calculate_revenue(
+                total_bookings_online_day, total_bookings_offline_day,
+                price_online_base_window[0], price_offline_window[0]
+            )
+            profit_ota_day = ota_agent.calculate_profit(
+                total_bookings_online_day, price_online_base_window[0], subsidy_ratio_window[0]
+            )
+            actual_subsidy_amount_day = (total_bookings_online_day * price_online_base_window[0] * 
+                                        RL_CONFIG.commission_rate * subsidy_ratio_window[0])
+            
+            total_reward_hotel += revenue_hotel_day
+            total_reward_ota += profit_ota_day
+            total_bookings_online += total_bookings_online_day
+            total_bookings_offline += total_bookings_offline_day
+            total_subsidy += actual_subsidy_amount_day
             
             # 保存最后一天的补贴比例用于统计
-            last_subsidy_ratio = subsidy_ratio_today
+            last_subsidy_ratio = subsidy_ratio_window[0]
             
             state = next_state
             if done:

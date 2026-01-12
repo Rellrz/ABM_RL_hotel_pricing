@@ -389,6 +389,12 @@ class HotelABMModel(Model):
         new_bookings_offline = 0
         cancellations = 0
         
+        # 按day_offset统计预订信息（用于强化学习更新）
+        bookings_by_day_offset = [
+            {'day_offset': i, 'bookings_online': 0, 'bookings_offline': 0, 'revenue_online': 0.0, 'revenue_offline': 0.0}
+            for i in range(5)
+        ]
+        
         # 客户决策阶段
         for customer in daily_customers:
             target_date = customer.profile.target_date
@@ -418,10 +424,20 @@ class HotelABMModel(Model):
                     self.active_bookings.append(customer.booking_record)
                     self.booking_history.append(customer.booking_record)
                     
+                    # 统计总预订量
                     if customer.profile.customer_type == 'online':
                         new_bookings_online += 1
                     else:
                         new_bookings_offline += 1
+                    
+                    # 统计按day_offset分组的预订信息
+                    if 0 <= days_ahead < 5:
+                        if customer.profile.customer_type == 'online':
+                            bookings_by_day_offset[days_ahead]['bookings_online'] += 1
+                            bookings_by_day_offset[days_ahead]['revenue_online'] += customer.booking_record.paid_price
+                        else:
+                            bookings_by_day_offset[days_ahead]['bookings_offline'] += 1
+                            bookings_by_day_offset[days_ahead]['revenue_offline'] += customer.booking_record.paid_price
                 # else: 该日期已满房，拒绝预订
             # 直接在simulate_day中创建booking_record，跳过效用函数
             #if not customer.has_booked and self.daily_available_rooms[target_date] > 0:
@@ -518,6 +534,7 @@ class HotelABMModel(Model):
             'revenue_offline': new_bookings_offline * price_offline,
             'gross_revenue': gross_revenue,  # ✅ 毛收益（新预订）
             'total_revenue': net_revenue,  # ✅ 净收益（扣除退款后）
+            'bookings_by_day_offset': bookings_by_day_offset,  # ✅ 按day_offset分组的预订信息
         }
         
         self.daily_stats.append(daily_stat)

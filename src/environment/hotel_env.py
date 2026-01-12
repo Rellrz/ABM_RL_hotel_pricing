@@ -478,7 +478,8 @@ class HotelEnvironment:
                 'revenue_offline': self.last_abm_stat.get('revenue_offline', 0),
                 'price_online': self.last_abm_stat.get('price_online', 0),
                 'price_offline': self.last_abm_stat.get('price_offline', 0),
-                'new_customers': self.last_abm_stat.get('new_customers', 0)
+                'new_customers': self.last_abm_stat.get('new_customers', 0),
+                'bookings_by_day_offset': self.last_abm_stat.get('bookings_by_day_offset', [])  # ✅ 按day_offset分组的预订信息
             })
             
         return new_state, total_revenue, done, info

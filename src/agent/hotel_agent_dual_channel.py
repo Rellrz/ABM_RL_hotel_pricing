@@ -78,7 +78,6 @@ class HotelAgentDualChannel:
         # 根据配置选择算法
         if self.algorithm_type == 'cem_nn':
             # 使用神经网络版CEM
-            # 价格范围较大(90-180)，可以使用较大的initial_std
             self.cem_online = NeuralCrossEntropyMethod(
                 state_dim=RL_CONFIG.cem_nn_state_dim,
                 action_dim=1,
@@ -91,8 +90,7 @@ class HotelAgentDualChannel:
                 hidden_dims=RL_CONFIG.cem_nn_hidden_dims,
                 batch_size=RL_CONFIG.cem_nn_batch_size,
                 memory_size=RL_CONFIG.cem_nn_memory_size,
-                min_std=min_std,
-                initial_std=initial_std  # 使用传入的初始标准差
+                min_std=min_std
             )
             
             self.cem_offline = NeuralCrossEntropyMethod(
@@ -107,8 +105,7 @@ class HotelAgentDualChannel:
                 hidden_dims=RL_CONFIG.cem_nn_hidden_dims,
                 batch_size=RL_CONFIG.cem_nn_batch_size,
                 memory_size=RL_CONFIG.cem_nn_memory_size,
-                min_std=min_std,
-                initial_std=initial_std  # 使用传入的初始标准差
+                min_std=min_std
             )
         else:
             # 使用传统表格版CEM
@@ -149,41 +146,44 @@ class HotelAgentDualChannel:
         """
         离散化状态
         
-        状态空间：库存档位(5) × 季节(3) × 日期类型(2) = 30种状态
-        但实际使用18种（简化版）
+        状态空间：库存档位(3) × 季节(3) × 日期类型(2) = 18种状态
+        
+        关键修正：
+        - 直接使用环境返回的inventory_level（0-2），不重新计算
+        - 正确使用weekday维度，避免状态空间塌缩
         
         Args:
-            state: 状态字典
-            season: 季节（0-2）
-            weekday: 是否周末
+            state: 状态字典（必须包含inventory_level, season, weekday）
+            season: 季节（0-2），如果提供则覆盖state中的值
+            weekday: 是否周末（0-1），如果提供则覆盖state中的值
             
         Returns:
-            state_idx: 离散化的状态索引
+            state_idx: 离散化的状态索引（0-17）
         """
         if isinstance(state, (int, np.integer)):
             return int(state)
         
         # 提取状态特征
         if isinstance(state, dict):
-            inventory = state.get('inventory', [100])[0] if isinstance(state.get('inventory'), list) else state.get('inventory', 100)
+            # 直接使用环境已经离散化好的inventory_level（0-2）
+            inventory_level = state.get('inventory_level', 2)
             season = state.get('season', 0) if season is None else season
             weekday = state.get('weekday', 0) if weekday is None else weekday
         else:
-            inventory = state[0] if len(state) > 0 else 100
+            inventory_level = 2
             season = season if season is not None else 0
             weekday = weekday if weekday is not None else 0
         
-        # 库存档位（0-4）：0-20, 20-40, 40-60, 60-80, 80-100
-        inventory_level = min(4, int(inventory / 20))
-        
+        # 库存档位（0-2）：环境已离散化
+        # 0: ≤33间, 1: 34-66间, 2: ≥67间
+        inventory_level = int(inventory_level)
         # 季节（0-2）：淡季、平季、旺季
-        season = int(season) % 3
-        
+        season = int(season)
         # 日期类型（0-1）：工作日、周末
         weekday = int(weekday)
         
-        # 组合状态索引：5 × 3 × 2 = 30，但我们简化为18
-        state_idx = inventory_level * 3 + season
+        # 组合状态索引：3(库存) × 3(季节) × 2(工作日) = 18
+        state_idx = inventory_level * 6 + season * 2 + weekday
         
         return state_idx
     
