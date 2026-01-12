@@ -203,15 +203,25 @@ def train_game_system(historical_data: pd.DataFrame,
                 actual_subsidy_amount = (bookings_online * price_online_base * 
                                         RL_CONFIG.commission_rate * subsidy_ratio)
                 
-                # 更新酒店Agent
-                action_hotel = np.array([price_online_base, price_offline])
-                hotel_agent.update(state_for_day, action_hotel, revenue_hotel, next_state, done, actual_subsidy_amount)
+                # 计算系统总收益
+                total_system_profit = revenue_hotel + profit_ota
                 
-                # 更新OTA Agent（除非是fixed_ota模式）
+                # 计算混合奖励（解决量纲问题）
+                # 对酒店：系统总收益直接使用，因为酒店收益已经是大头
+                reward_hotel = (RL_CONFIG.reward_hotel_ratio * revenue_hotel + 
+                               (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit)
+                reward_ota = (RL_CONFIG.reward_ota_ratio * profit_ota + 
+                             (1 - RL_CONFIG.reward_ota_ratio) * total_system_profit)
+                
+                # 更新酒店Agent（使用混合奖励）
+                action_hotel = np.array([price_online_base, price_offline])
+                hotel_agent.update(state_for_day, action_hotel, reward_hotel, next_state, done, actual_subsidy_amount)
+                
+                # 更新OTA Agent（除非是fixed_ota模式，使用混合奖励）
                 if training_mode != 'fixed_ota':
                     ota_agent.update(
                         price_online_base, price_offline, state_for_day,
-                        subsidy_ratio, profit_ota, next_state, done
+                        subsidy_ratio, reward_ota, next_state, done
                     )
             
             # 6. 累积统计（使用总预订量）

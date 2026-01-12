@@ -208,10 +208,16 @@ class RLConfig:
     min_std: float = 5.0  # 最小探索标准差 - 极小值减少后期波动
     std_decay: float = 0.999  # 标准差衰减率 - 持续衰减到500轮（0.99）
     
+    # ========== 奖励函数参数 ==========
+    reward_hotel_ratio: float = 0  # 个体收益权重（α）
+    reward_ota_ratio: float = 1
+    # ratio = 1 为完全自私
+    # ratio = 0 为完全利他
+    
     # ========== CEM参数 ==========
     cem_algorithm: str = 'cem'  # 'cem' (表格版) 或 'cem_nn' (神经网络版)
     cem_n_samples: int = 100  # CEM每次采样的动作数量
-    cem_elite_frac: float = 0.4  # CEM精英样本比例（top-k）
+    cem_elite_frac: float = 0.3  # CEM精英样本比例（top-k）
     
     # ========== CEM-NN参数 ==========
     cem_nn_state_dim: int = 18  # 状态维度
