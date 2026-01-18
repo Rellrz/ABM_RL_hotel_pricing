@@ -260,8 +260,8 @@ class RLConfig:
 class EnvConfig:
     """酒店环境参数，模拟真实的酒店运营环境"""
     
-    initial_inventory: int = 100
-    max_inventory: int = 100
+    initial_inventory: int = 250
+    max_inventory: int = 250
     min_inventory: int = 0
     
     online_price_levels: List[int] = field(default_factory=lambda: [80,85, 90, 95, 100, 105,110, 115, 120, 125, 130, 135])

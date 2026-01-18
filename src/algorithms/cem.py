@@ -287,3 +287,22 @@ class CrossEntropyMethod(BaseRLAlgorithm):
         self.state_visit_count = defaultdict(int)
         self.episode_count = 0
         self.update_count = 0
+
+    def save_model(self, file_path: str, file_name: str):
+        """保存模型参数"""
+        from configs.config import PATH_CONFIG
+        import json, datetime
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        models_dir = PATH_CONFIG.models_dir
+
+        save_path = os.path.join(models_dir, f'{file_name}_agent_{timestamp}.json')
+
+        save_dict =  {'cem_online_means': {str(k): float(v) for k, v in self.mean_table.items()},
+            'cem_online_stds': {str(k): float(v) for k, v in self.std_table.items()},
+            'cem_online_state_visit_count': {str(k): int(v) for k, v in self.state_visit_count.items()}}
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(save_dict, f, indent=2, ensure_ascii=False)
+        
