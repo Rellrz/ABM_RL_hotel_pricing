@@ -66,7 +66,7 @@ class CustomerAgent(Agent):
         self.has_booked = False
         self.booking_record: Optional[BookingRecord] = None
         
-    def evaluate_booking_utility(self, price: float, current_day: int) -> float:
+    def evaluate_booking_utility(self, price: float, current_day: int, discount_ratio: float = 1.0) -> float:
         """
         评估预订效用
         
@@ -81,19 +81,15 @@ class CustomerAgent(Agent):
             效用得分
         """
         # 经济盈余效用：(WTP - P) * β
-        economic_surplus = (self.profile.wtp - price) * self.profile.price_sensitivity
+        economic_surplus = (self.profile.wtp*discount_ratio) - price
         
         # 紧迫性效用：γ/(L+1)
         # 提前期越短，紧迫性越高
         gamma = self.model.params.urgency_weight
         urgency_utility = gamma / (self.profile.lead_time + 1)
         
-        # 随机噪声：模拟非理性因素
-        noise_std = self.model.params.noise_std
-        noise = np.random.normal(0, noise_std)
-        
         # 总效用
-        utility = economic_surplus + urgency_utility + noise
+        utility = economic_surplus + urgency_utility
         
         return utility
     
@@ -112,21 +108,25 @@ class CustomerAgent(Agent):
             return False
         
         # 计算效用
-        online_utility = self.evaluate_booking_utility(online_price, current_day)
-        
-        # 线下效用加入随机误差项，模拟线下渠道的不确定性和额外成本/便利性
-        offline_utility_base = self.evaluate_booking_utility(offline_price, current_day)
-        offline_noise = np.random.normal(0, 5)  # 均值0，标准差5的随机误差
-        offline_utility = offline_utility_base + offline_noise
-        # 决策阈值
-        if offline_utility > online_utility:
-            utility = offline_utility
-            price = offline_price
-            self.profile.customer_type = 'offline'
+        if self.profile.customer_type == 'online':
+            online_utility = self.evaluate_booking_utility(online_price, current_day,discount_ratio = self.model.params.online_discount_ratio)
         else:
+            online_utility = self.evaluate_booking_utility(online_price, current_day,discount_ratio = self.model.params.online_discount_ratio)
+            offline_utility = self.evaluate_booking_utility(offline_price, current_day)
+        
+        if offline_utility is None:
             utility = online_utility
             price = online_price
             self.profile.customer_type = 'online'
+        else:
+            if online_utility > offline_utility:
+                utility = online_utility
+                price = online_price
+                self.profile.customer_type = 'online'
+            else:
+                utility = offline_utility
+                price = offline_price
+                self.profile.customer_type = 'offline'
 
         threshold = self.model.params.booking_threshold
         # 做出决策
@@ -356,7 +356,7 @@ class HotelABMModel(Model):
         
         # 5. 客户类型（线上/线下）
         # 根据历史数据比例随机分配
-        customer_type = np.random.choice(['online', 'offline'], p=[0.6, 0.4])
+        customer_type = np.random.choice(['online', 'offline'], p=self.params.customer_type_ratio)
         
         return CustomerProfile(
             lead_time=lead_time,

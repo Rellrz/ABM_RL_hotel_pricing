@@ -164,6 +164,8 @@ class ABMConfig:
     urgency_weight: float = 20
     noise_std: float = 12.0
     booking_threshold: float = -15
+    customer_type_ratio: Tuple[float, float] = (0.6, 0.4)
+    online_discount_ratio: float = 0.8
     
     regret_coefficient: float = 0.75
     commitment_weight: float = 8.0
@@ -230,7 +232,7 @@ class RLConfig:
     
     # ========== 博弈系统参数 ==========
     enable_game_mode: bool = False  # 是否启用酒店-OTA博弈模式
-    commission_rate: float = 0.15  # OTA佣金率（15%）
+    commission_rate: float = 0.30  # OTA佣金率（15%）
     subsidy_ratio_min: float = 0.0  # OTA补贴比例最小值（0%，不补贴）
     subsidy_ratio_max: float = 0.8  # OTA补贴比例最大值（80%，最多补贴佣金的80%）
     online_price_min: float = 90.0  # 线上基础价格最小值（需覆盖佣金）
