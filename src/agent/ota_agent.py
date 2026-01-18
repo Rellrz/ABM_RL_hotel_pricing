@@ -282,7 +282,7 @@ class OTAAgent:
         """获取当前策略（各状态的最优补贴）"""
         return self.cem.get_policy()
     
-    def save(self, filepath: str) -> None:
+    def save(self) -> None:
         """
         保存Agent参数到JSON文件（易读格式）
         
@@ -291,12 +291,12 @@ class OTAAgent:
         """
         import json
         
-        self.cem.save_model(filepath,'ota')
-        
+        self.cem.save_model('ota')
+
 
     
     @classmethod
-    def load(cls, filepath: str) -> 'OTAAgent':
+    def load(cls) -> 'OTAAgent':
         """
         从文件加载Agent参数（支持JSON和PKL格式）
         

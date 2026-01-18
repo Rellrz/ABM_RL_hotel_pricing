@@ -288,10 +288,11 @@ class CrossEntropyMethod(BaseRLAlgorithm):
         self.episode_count = 0
         self.update_count = 0
 
-    def save_model(self, file_path: str, file_name: str):
+    def save_model(self, file_name: str):
         """保存模型参数"""
         from configs.config import PATH_CONFIG
-        import json, datetime
+        from datetime import datetime
+        import json, os
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
@@ -303,6 +304,6 @@ class CrossEntropyMethod(BaseRLAlgorithm):
             'cem_online_stds': {str(k): float(v) for k, v in self.std_table.items()},
             'cem_online_state_visit_count': {str(k): int(v) for k, v in self.state_visit_count.items()}}
         
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(save_dict, f, indent=2, ensure_ascii=False)
         

@@ -377,15 +377,15 @@ class HotelAgentDualChannel:
         """兼容性接口：返回空字典（CEM不使用Q表）"""
         return {}
     
-    def save(self, filepath: str) -> None:
+    def save(self) -> None:
         """
         保存Agent参数到JSON文件（易读格式）
         
         Args:
             filepath: 保存路径（自动添加.json后缀）
         """
-        self.cem_online.save_model(filepath, 'hotel_online')
-        self.cem_offline.save_model(filepath, 'hotel_offline')
+        self.cem_online.save_model('hotel_online')
+        self.cem_offline.save_model('hotel_offline')
         
     
     @classmethod

@@ -63,15 +63,9 @@ def main():
     # 保存结果
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
-    # 保存Agent
-    models_dir = PATH_CONFIG.models_dir
-    
-    hotel_path = os.path.join(models_dir, f'hotel_agent_{timestamp}.pkl')
-    ota_path = os.path.join(models_dir, f'ota_agent_{timestamp}.pkl')
-    
     # 保存模型参数
-    hotel_agent.save(hotel_path)
-    ota_agent.save(ota_path)
+    hotel_agent.save()
+    ota_agent.save()
 
     # 绘制结果
     figure_dir = os.path.join(PROJECT_ROOT, 'outputs', 'figures')
@@ -82,7 +76,7 @@ def main():
     
     # 保存训练数据
     df = pd.DataFrame(episode_info)
-    data_path = os.path.join(models_dir, f'training_data_{timestamp}.csv')
+    data_path = os.path.join(PATH_CONFIG.models_dir, f'training_data_{timestamp}.csv')
     df.to_csv(data_path, index=False)
     print(f"\n训练数据已保存到: {data_path}")
     
