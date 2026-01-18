@@ -281,3 +281,142 @@ class OTAAgent:
     def get_policy(self) -> Dict[Any, float]:
         """获取当前策略（各状态的最优补贴）"""
         return self.cem.get_policy()
+    
+    def save(self, filepath: str) -> None:
+        """
+        保存Agent参数到JSON文件（易读格式）
+        
+        Args:
+            filepath: 保存路径（自动添加.json后缀）
+        """
+        import json
+        
+        # 确保文件名以.json结尾
+        if not filepath.endswith('.json'):
+            filepath = filepath.replace('.pkl', '.json')
+        
+        # 转换为JSON可序列化的格式
+        save_dict = {
+            # 基本配置
+            'commission_rate': float(self.commission_rate),
+            'subsidy_ratio_min': float(self.subsidy_ratio_min),
+            'subsidy_ratio_max': float(self.subsidy_ratio_max),
+            'n_states': int(self.n_states),
+            'n_samples': int(self.n_samples),
+            'elite_frac': float(self.elite_frac),
+            'initial_std': float(self.initial_std),
+            'min_std': float(self.min_std),
+            'std_decay': float(self.std_decay),
+            'algorithm_type': str(self.algorithm_type),
+            
+            # CEM参数（转换键为字符串）
+            'cem_means': {str(k): float(v) for k, v in self.cem.means.items()},
+            'cem_stds': {str(k): float(v) for k, v in self.cem.stds.items()},
+            'cem_current_std': float(self.cem.current_std),
+            'cem_state_visit_count': {str(k): int(v) for k, v in self.cem.state_visit_count.items()},
+            
+            # 统计信息
+            'total_profit': float(self.total_profit),
+            'total_commission': float(self.total_commission),
+            'total_subsidy_cost': float(self.total_subsidy_cost),
+            'episode_count': int(self.episode_count)
+        }
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(save_dict, f, indent=2, ensure_ascii=False)
+        
+        print(f"✅ OTA Agent参数已保存到: {filepath}")
+    
+    @classmethod
+    def load(cls, filepath: str) -> 'OTAAgent':
+        """
+        从文件加载Agent参数（支持JSON和PKL格式）
+        
+        Args:
+            filepath: 文件路径
+            
+        Returns:
+            加载的OTAAgent实例
+        """
+        import json
+        from collections import defaultdict
+        
+        # 自动检测文件格式
+        if filepath.endswith('.json'):
+            with open(filepath, 'r', encoding='utf-8') as f:
+                save_dict = json.load(f)
+            # JSON中的键是字符串，需要转换回元组
+            save_dict['cem_means'] = {eval(k): v for k, v in save_dict['cem_means'].items()}
+            save_dict['cem_stds'] = {eval(k): v for k, v in save_dict['cem_stds'].items()}
+            save_dict['cem_state_visit_count'] = {eval(k): v for k, v in save_dict['cem_state_visit_count'].items()}
+        else:
+            # PKL格式
+            import pickle
+            with open(filepath, 'rb') as f:
+                save_dict = pickle.load(f)
+        
+        # 创建新实例
+        agent = cls(
+            commission_rate=save_dict['commission_rate'],
+            subsidy_ratio_min=save_dict['subsidy_ratio_min'],
+            subsidy_ratio_max=save_dict['subsidy_ratio_max'],
+            n_states=save_dict['n_states'],
+            n_samples=save_dict['n_samples'],
+            elite_frac=save_dict['elite_frac'],
+            initial_std=save_dict['initial_std'],
+            min_std=save_dict['min_std'],
+            std_decay=save_dict['std_decay']
+        )
+        
+        # 恢复CEM参数
+        agent.cem.means = defaultdict(
+            lambda: (save_dict['subsidy_ratio_min'] + save_dict['subsidy_ratio_max']) / 2,
+            save_dict['cem_means']
+        )
+        agent.cem.stds = defaultdict(
+            lambda: save_dict['initial_std'],
+            save_dict['cem_stds']
+        )
+        agent.cem.current_std = save_dict['cem_current_std']
+        agent.cem.state_visit_count = defaultdict(int, save_dict['cem_state_visit_count'])
+        
+        # 恢复统计信息
+        agent.total_profit = save_dict['total_profit']
+        agent.total_commission = save_dict['total_commission']
+        agent.total_subsidy_cost = save_dict['total_subsidy_cost']
+        agent.episode_count = save_dict['episode_count']
+        
+        print(f"✅ OTA Agent参数已从 {filepath} 加载")
+        return agent
+    
+    def print_parameters(self) -> None:
+        """打印Agent的详细参数"""
+        print(f"\n{'='*60}")
+        print(f"OTA Agent参数")
+        print(f"{'='*60}")
+        
+        print(f"\n【配置信息】")
+        print(f"  佣金率: {self.commission_rate*100:.1f}%")
+        print(f"  补贴比例范围: [{self.subsidy_ratio_min*100:.0f}%, {self.subsidy_ratio_max*100:.0f}%]")
+        print(f"  状态空间维度: {self.n_states}")
+        print(f"  CEM采样数: {self.n_samples}")
+        print(f"  精英比例: {self.elite_frac*100:.0f}%")
+        
+        print(f"\n【补贴策略CEM】")
+        print(f"  当前探索标准差: {self.cem.current_std:.4f}")
+        print(f"  最小标准差: {self.cem.min_std:.4f}")
+        print(f"  已访问状态数: {len(self.cem.means)}")
+        
+        if len(self.cem.means) > 0:
+            all_means = list(self.cem.means.values())
+            all_stds = list(self.cem.stds.values())
+            print(f"  补贴比例均值范围: [{min(all_means)*100:.1f}%, {max(all_means)*100:.1f}%]")
+            print(f"  平均补贴比例: {np.mean(all_means)*100:.1f}%")
+            print(f"  平均标准差: {np.mean(all_stds):.4f}")
+        
+        print(f"\n【训练统计】")
+        print(f"  总利润: ${self.total_profit:,.2f}")
+        print(f"  总佣金收入: ${self.total_commission:,.2f}")
+        print(f"  总补贴支出: ${self.total_subsidy_cost:,.2f}")
+        print(f"  补贴率: {self.total_subsidy_cost/max(1,self.total_commission)*100:.1f}%")
+        print(f"  训练轮数: {self.episode_count}")

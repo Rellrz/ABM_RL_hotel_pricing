@@ -70,10 +70,13 @@ def main():
     hotel_path = os.path.join(output_dir, f'hotel_agent_{timestamp}.pkl')
     ota_path = os.path.join(output_dir, f'ota_agent_{timestamp}.pkl')
     
-    # 注意：需要实现save方法
-    print(f"\n模型保存路径:")
-    print(f"  酒店Agent: {hotel_path}")
-    print(f"  OTA Agent: {ota_path}")
+    # 保存模型参数
+    hotel_agent.save(hotel_path)
+    ota_agent.save(ota_path)
+    
+    # 打印模型参数
+    hotel_agent.print_parameters()
+    ota_agent.print_parameters()
     
     # 绘制结果
     figure_dir = os.path.join(PROJECT_ROOT, 'outputs', 'figures')

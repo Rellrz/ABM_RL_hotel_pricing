@@ -376,3 +376,165 @@ class HotelAgentDualChannel:
     def q_table(self) -> Dict:
         """兼容性接口：返回空字典（CEM不使用Q表）"""
         return {}
+    
+    def save(self, filepath: str) -> None:
+        """
+        保存Agent参数到JSON文件（易读格式）
+        
+        Args:
+            filepath: 保存路径（自动添加.json后缀）
+        """
+        import json
+        
+        # 确保文件名以.json结尾
+        if not filepath.endswith('.json'):
+            filepath = filepath.replace('.pkl', '.json')
+        
+        # 转换为JSON可序列化的格式
+        save_dict = {
+            # 基本配置
+            'n_states': int(self.n_states),
+            'commission_rate': float(self.commission_rate),
+            'online_price_min': float(self.online_price_min),
+            'online_price_max': float(self.online_price_max),
+            'offline_price_min': float(self.offline_price_min),
+            'offline_price_max': float(self.offline_price_max),
+            'n_samples': int(self.n_samples),
+            'elite_frac': float(self.elite_frac),
+            'initial_std': float(self.initial_std),
+            'min_std': float(self.min_std),
+            'std_decay': float(self.std_decay),
+            'algorithm_type': str(self.algorithm_type),
+            
+            # CEM参数（转换键为字符串，值为float）
+            'cem_online_means': {str(k): float(v) for k, v in self.cem_online.means.items()},
+            'cem_online_stds': {str(k): float(v) for k, v in self.cem_online.stds.items()},
+            'cem_online_current_std': float(self.cem_online.current_std),
+            'cem_online_state_visit_count': {str(k): int(v) for k, v in self.cem_online.state_visit_count.items()},
+            
+            'cem_offline_means': {str(k): float(v) for k, v in self.cem_offline.means.items()},
+            'cem_offline_stds': {str(k): float(v) for k, v in self.cem_offline.stds.items()},
+            'cem_offline_current_std': float(self.cem_offline.current_std),
+            'cem_offline_state_visit_count': {str(k): int(v) for k, v in self.cem_offline.state_visit_count.items()},
+            
+            # 统计信息
+            'total_revenue': float(self.total_revenue),
+            'total_revenue_online': float(self.total_revenue_online),
+            'total_revenue_offline': float(self.total_revenue_offline),
+            'episode_count': int(self.episode_count),
+            'ota_subsidy_history': [float(x) for x in list(self.ota_subsidy_history)]
+        }
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(save_dict, f, indent=2, ensure_ascii=False)
+        
+        print(f"✅ 酒店Agent参数已保存到: {filepath}")
+    
+    @classmethod
+    def load(cls, filepath: str) -> 'HotelAgentDualChannel':
+        """
+        从文件加载Agent参数（支持JSON和PKL格式）
+        
+        Args:
+            filepath: 文件路径
+            
+        Returns:
+            加载的HotelAgentDualChannel实例
+        """
+        import json
+        
+        # 自动检测文件格式
+        if filepath.endswith('.json'):
+            with open(filepath, 'r', encoding='utf-8') as f:
+                save_dict = json.load(f)
+            # JSON中的键是字符串，需要转换回元组
+            save_dict['cem_online_means'] = {eval(k): v for k, v in save_dict['cem_online_means'].items()}
+            save_dict['cem_online_stds'] = {eval(k): v for k, v in save_dict['cem_online_stds'].items()}
+            save_dict['cem_online_state_visit_count'] = {eval(k): v for k, v in save_dict['cem_online_state_visit_count'].items()}
+            save_dict['cem_offline_means'] = {eval(k): v for k, v in save_dict['cem_offline_means'].items()}
+            save_dict['cem_offline_stds'] = {eval(k): v for k, v in save_dict['cem_offline_stds'].items()}
+            save_dict['cem_offline_state_visit_count'] = {eval(k): v for k, v in save_dict['cem_offline_state_visit_count'].items()}
+        else:
+            # PKL格式
+            import pickle
+            with open(filepath, 'rb') as f:
+                save_dict = pickle.load(f)
+        
+        # 创建新实例
+        agent = cls(
+            n_states=save_dict['n_states'],
+            commission_rate=save_dict['commission_rate'],
+            online_price_min=save_dict['online_price_min'],
+            online_price_max=save_dict['online_price_max'],
+            offline_price_min=save_dict['offline_price_min'],
+            offline_price_max=save_dict['offline_price_max'],
+            n_samples=save_dict['n_samples'],
+            elite_frac=save_dict['elite_frac'],
+            initial_std=save_dict['initial_std'],
+            min_std=save_dict['min_std'],
+            std_decay=save_dict['std_decay']
+        )
+        
+        # 恢复CEM参数
+        agent.cem_online.means = defaultdict(lambda: (save_dict['online_price_min'] + save_dict['online_price_max']) / 2, 
+                                             save_dict['cem_online_means'])
+        agent.cem_online.stds = defaultdict(lambda: save_dict['initial_std'], 
+                                           save_dict['cem_online_stds'])
+        agent.cem_online.current_std = save_dict['cem_online_current_std']
+        agent.cem_online.state_visit_count = defaultdict(int, save_dict['cem_online_state_visit_count'])
+        
+        agent.cem_offline.means = defaultdict(lambda: (save_dict['offline_price_min'] + save_dict['offline_price_max']) / 2,
+                                              save_dict['cem_offline_means'])
+        agent.cem_offline.stds = defaultdict(lambda: save_dict['initial_std'],
+                                            save_dict['cem_offline_stds'])
+        agent.cem_offline.current_std = save_dict['cem_offline_current_std']
+        agent.cem_offline.state_visit_count = defaultdict(int, save_dict['cem_offline_state_visit_count'])
+        
+        # 恢复统计信息
+        agent.total_revenue = save_dict['total_revenue']
+        agent.total_revenue_online = save_dict['total_revenue_online']
+        agent.total_revenue_offline = save_dict['total_revenue_offline']
+        agent.episode_count = save_dict['episode_count']
+        agent.ota_subsidy_history = deque(save_dict['ota_subsidy_history'], maxlen=100)
+        
+        print(f"✅ 酒店Agent参数已从 {filepath} 加载")
+        return agent
+    
+    def print_parameters(self) -> None:
+        """打印Agent的详细参数"""
+        print(f"\n{'='*60}")
+        print(f"酒店Agent参数")
+        print(f"{'='*60}")
+        
+        print(f"\n【配置信息】")
+        print(f"  状态空间维度: {self.n_states}")
+        print(f"  佣金率: {self.commission_rate*100:.1f}%")
+        print(f"  线上价格范围: [{self.online_price_min:.0f}, {self.online_price_max:.0f}]")
+        print(f"  线下价格范围: [{self.offline_price_min:.0f}, {self.offline_price_max:.0f}]")
+        print(f"  CEM采样数: {self.n_samples}")
+        print(f"  精英比例: {self.elite_frac*100:.0f}%")
+        
+        print(f"\n【线上价格CEM】")
+        self._print_cem_params(self.cem_online, "线上基础价格")
+        
+        print(f"\n【线下价格CEM】")
+        self._print_cem_params(self.cem_offline, "线下价格")
+        
+        print(f"\n【训练统计】")
+        print(f"  总收益: ${self.total_revenue:,.2f}")
+        print(f"  线上收益: ${self.total_revenue_online:,.2f} ({self.total_revenue_online/max(1,self.total_revenue)*100:.1f}%)")
+        print(f"  线下收益: ${self.total_revenue_offline:,.2f} ({self.total_revenue_offline/max(1,self.total_revenue)*100:.1f}%)")
+        print(f"  训练轮数: {self.episode_count}")
+    
+    def _print_cem_params(self, cem, name: str) -> None:
+        """打印单个CEM的参数"""
+        print(f"  当前探索标准差: {cem.current_std:.4f}")
+        print(f"  最小标准差: {cem.min_std:.4f}")
+        print(f"  已访问状态数: {len(cem.means)}")
+        
+        if len(cem.means) > 0:
+            all_means = list(cem.means.values())
+            all_stds = list(cem.stds.values())
+            print(f"  均值范围: [{min(all_means):.2f}, {max(all_means):.2f}]")
+            print(f"  平均均值: {np.mean(all_means):.2f}")
+            print(f"  平均标准差: {np.mean(all_stds):.4f}")

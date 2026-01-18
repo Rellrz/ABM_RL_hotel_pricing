@@ -113,6 +113,9 @@ def train_game_system(historical_data: pd.DataFrame,
         total_bookings_offline = 0
         total_subsidy = 0.0
         
+        # 是否是最后一个episode（用于记录详细数据）
+        is_last_episode = (episode == episodes - 1)
+        
         # 365天模拟
         for day in range(365):
             # 1. 为未来5天构建状态窗口和决策
@@ -247,6 +250,25 @@ def train_game_system(historical_data: pd.DataFrame,
             
             # 保存最后一天的补贴比例用于统计
             last_subsidy_ratio = subsidy_ratio_window[0]
+            
+            # 如果是最后一个episode，记录每日详细数据到TensorBoard
+            if is_last_episode:
+                # 记录价格数据
+                writer.add_scalar('LastEpisode/Price_Online_Base', price_online_base_window[0], day)
+                writer.add_scalar('LastEpisode/Price_Online_Final', price_online_final_window[0], day)
+                writer.add_scalar('LastEpisode/Price_Offline', price_offline_window[0], day)
+                
+                # 记录补贴数据
+                writer.add_scalar('LastEpisode/Subsidy_Ratio', subsidy_ratio_window[0] * 100, day)  # 百分比
+                writer.add_scalar('LastEpisode/Subsidy_Amount', subsidy_amount_window[0], day)
+                
+                # 记录预订数据
+                writer.add_scalar('LastEpisode/Bookings_Online', total_bookings_online_day, day)
+                writer.add_scalar('LastEpisode/Bookings_Offline', total_bookings_offline_day, day)
+                
+                # 记录收益数据
+                writer.add_scalar('LastEpisode/Revenue_Hotel', revenue_hotel_day, day)
+                writer.add_scalar('LastEpisode/Profit_OTA', profit_ota_day, day)
             
             state = next_state
             if done:

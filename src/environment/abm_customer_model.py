@@ -110,6 +110,7 @@ class CustomerAgent(Agent):
         # 计算效用
         if self.profile.customer_type == 'online':
             online_utility = self.evaluate_booking_utility(online_price, current_day,discount_ratio = self.model.params.online_discount_ratio)
+            offline_utility = None
         else:
             online_utility = self.evaluate_booking_utility(online_price, current_day,discount_ratio = self.model.params.online_discount_ratio)
             offline_utility = self.evaluate_booking_utility(offline_price, current_day)
