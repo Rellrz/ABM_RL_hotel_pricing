@@ -164,7 +164,7 @@ class ABMConfig:
     urgency_weight: float = 20
     noise_std: float = 12.0
     booking_threshold: float = -15
-    customer_type_ratio: Tuple[float, float] = (0.3, 0.7) #(ota_channel, ota and direct channel)
+    customer_type_ratio: Tuple[float, float] = (0.7, 0.3) #(ota_channel, ota and direct channel)
     online_discount_ratio: float = 0.8
     
     regret_coefficient: float = 0.75
@@ -235,10 +235,10 @@ class RLConfig:
     commission_rate: float = 0.30  # OTA佣金率（15%）
     subsidy_ratio_min: float = 0.0  # OTA补贴比例最小值（0%，不补贴）
     subsidy_ratio_max: float = 0.8  # OTA补贴比例最大值（80%，最多补贴佣金的80%）
-    online_price_min: float = 90.0  # 线上基础价格最小值（需覆盖佣金）
+    online_price_min: float = 80.0  # 线上基础价格最小值（需覆盖佣金）
     online_price_max: float = 180.0  # 线上基础价格最大值
     offline_price_min: float = 80.0  # 线下价格最小值
-    offline_price_max: float = 170.0  # 线下价格最大值
+    offline_price_max: float = 180.0  # 线下价格最大值
     game_training_mode: str = 'simultaneous'  # 训练模式：'fixed_ota', 'alternating', 'simultaneous'
     
     episodes: int = 500  # Actor-Critic需要更多轮次
