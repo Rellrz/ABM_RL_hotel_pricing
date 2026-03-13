@@ -3,7 +3,7 @@
 
 import os
 from dataclasses import dataclass, field #自动根据类属性生成构造函数__init__
-from typing import List, Dict, Tuple, Optional
+from typing import Any, List, Dict, Tuple, Optional
 import pandas as pd
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -76,25 +76,43 @@ def calculate_monthly_arrival_rates(historical_data: pd.DataFrame) -> Dict[int, 
 
 
 def fit_lead_time_distribution(historical_data: pd.DataFrame) -> Dict[str, float]:
-    """
-    拟合提前期分布（指数分布）
-    
-    Args:
-        historical_data: 历史预订数据
-        
-    Returns:
-        分布参数字典
-    """
+    """拟合提前期分布（指数分布，作为兜底）"""
     if 'lead_time' not in historical_data.columns:
         return {'mean': 104.0}
-    
+
     lead_times = historical_data['lead_time'].dropna()
     lead_times = lead_times[lead_times >= 0]
-    
+
     if len(lead_times) == 0:
         return {'mean': 104.0}
-    
+
     return {'mean': float(lead_times.mean())}
+
+
+def build_empirical_lead_time_distribution(
+    historical_data: pd.DataFrame,
+    max_lead_time_days: int = 90,
+) -> Dict[str, Any]:
+
+    lead_times = historical_data['lead_time'].dropna().astype(int)
+    lead_times = lead_times[(lead_times >= 0) & (lead_times <= max_lead_time_days)]
+
+
+    counts = lead_times.value_counts().sort_index()
+    support = list(range(max_lead_time_days + 1))
+    total = float(counts.sum())
+    probabilities = [float(counts.get(d, 0)) / total for d in support]
+
+    prob_sum = float(sum(probabilities))
+    if prob_sum > 0:
+        probabilities = [p / prob_sum for p in probabilities]
+
+    return {
+        'type': 'empirical',
+        'max_days': max_lead_time_days,
+        'support': support,
+        'probabilities': probabilities,
+    }
 
 
 def fit_wtp_distribution(historical_data: pd.DataFrame) -> Dict[str, float]:
@@ -139,11 +157,12 @@ def create_abm_config(data_path:str = None) -> 'ABMConfig':
         historical_data = pd.read_csv(data_path)
         historical_data = historical_data[historical_data['hotel'] == 'City Hotel'].copy()
         monthly_arrival_rates = calculate_monthly_arrival_rates(historical_data)
-        lead_time_params = fit_lead_time_distribution(historical_data)
+        lead_time_params = build_empirical_lead_time_distribution(historical_data, max_lead_time_days=90)
+        lead_time_params['mean'] = fit_lead_time_distribution(historical_data)['mean']
         wtp_params = fit_wtp_distribution(historical_data)
     else:
         monthly_arrival_rates = {m: 100.0 for m in range(1, 13)}
-        lead_time_params = {'mean': 104.0}
+        lead_time_params = {'type': 'exponential', 'mean': 104.0}
         wtp_params = {'mean': 100.0, 'std': 30.0}
     
     return ABMConfig(
@@ -158,7 +177,7 @@ class ABMConfig:
     """ABM客户行为模型配置"""
     
     monthly_arrival_rates: Dict[int, float] = field(default_factory=lambda: {m: 100.0 for m in range(1, 13)})
-    lead_time_params: Dict[str, float] = field(default_factory=lambda: {'mean': 104.0})
+    lead_time_params: Dict[str, Any] = field(default_factory=lambda: {'type': 'exponential', 'mean': 104.0})
     wtp_params: Dict[str, float] = field(default_factory=lambda: {'mean': 100.0, 'std': 30.0})
     
     urgency_weight: float = 20
@@ -263,6 +282,8 @@ class EnvConfig:
     initial_inventory: int = 250
     max_inventory: int = 250
     min_inventory: int = 0
+
+    booking_window_days: int = 91
     
     online_price_levels: List[int] = field(default_factory=lambda: [80,85, 90, 95, 100, 105,110, 115, 120, 125, 130, 135])
     offline_price_levels: List[int] = field(default_factory=lambda: [90,95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145])

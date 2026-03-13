@@ -69,8 +69,13 @@ class HotelEnvironment:
         - 支持90天周期模拟，支持自定义起始日期
     """
     
-    def __init__(self, initial_inventory: int = None, cost_per_room: int = 20, historical_data: Optional[Any] = None,
-                 booking_window_days: int = 5):
+    def __init__(
+        self,
+        initial_inventory: int = None,
+        cost_per_room: int = 20,
+        historical_data: Optional[Any] = None,
+        booking_window_days: Optional[int] = None,
+    ):
         
         # 从配置文件读取客房数量，如果没有显式传递参数
         if initial_inventory is None:
@@ -81,23 +86,24 @@ class HotelEnvironment:
         self.cost_per_room = cost_per_room # 每间客房的成本
         
         # ✅ 预订窗口：客户只能预订未来N天（包括今天）
-        self.booking_window_days = booking_window_days  # 默认5天
+        self.booking_window_days = int(ENV_CONFIG.booking_window_days if booking_window_days is None else booking_window_days)
         
         # ABM模式配置 - 根据RANDOM_CONFIG决定是否使用随机种子
         abm_random_seed = RANDOM_CONFIG.fixed_seed if RANDOM_CONFIG.random_mode == 'fixed' else None
         self.abm_model = HotelABMModel(
             historical_data=historical_data,
-            random_seed=abm_random_seed
-            )
+            random_seed=abm_random_seed,
+            booking_window_days=self.booking_window_days,
+        )
         
         # ✅ 初始化未来库存数组：使用booking_window_days作为窗口大小
         # 跟踪当前及未来booking_window_days天的可售客房量
         # 例如：booking_window_days=5，则维护[今天, 明天, 后天, 大后天, 第5天]的库存
         self.future_inventory = None
         
-        # ✅ 当前价格窗口：存储未来5天的价格
-        self.current_price_window_online = [100.0] * booking_window_days
-        self.current_price_window_offline = [120.0] * booking_window_days
+        # ✅ 当前价格窗口：存储未来N天的价格
+        self.current_price_window_online = [100.0] * self.booking_window_days
+        self.current_price_window_offline = [120.0] * self.booking_window_days
         
         self.reset()
     
@@ -379,9 +385,8 @@ class HotelEnvironment:
             price_windows_online = [float(price_online)] + self.current_price_window_online[1:]
             price_windows_offline = [float(price_offline)] + self.current_price_window_offline[1:]
             
-        elif isinstance(action, (list, np.ndarray)) and len(action) == 5:
-            # 5个动作：分别对应5天
-            actions_window = action
+        elif isinstance(action, (list, np.ndarray)) and len(action) in (5, self.booking_window_days):
+            actions_window = list(action)
             price_windows_online = []
             price_windows_offline = []
             

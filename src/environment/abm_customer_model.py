@@ -229,7 +229,8 @@ class HotelABMModel(Model):
     
     def __init__(self, 
                  historical_data: pd.DataFrame,
-                 random_seed: Optional[int] = None):
+                 random_seed: Optional[int] = None,
+                 booking_window_days: int = 5):
         """
         初始化ABM模型
         
@@ -262,9 +263,9 @@ class HotelABMModel(Model):
         self.daily_available_rooms = defaultdict(lambda: self.params.get('max_inventory', 226))
         
         # ✅ 价格窗口（由HotelEnvironment同步）
-        self.price_window_online = [100.0] * 5  # 未来5天的线上价格
-        self.price_window_offline = [120.0] * 5  # 未来5天的线下价格
-        self.booking_window_days = 5  # 预订窗口：只能预订未来5天
+        self.booking_window_days = int(booking_window_days)
+        self.price_window_online = [100.0] * self.booking_window_days
+        self.price_window_offline = [120.0] * self.booking_window_days
         
         # 活跃预订记录（未取消且未入住）
         self.active_bookings: List[BookingRecord] = []
@@ -320,6 +321,21 @@ class HotelABMModel(Model):
         
         return customers
     
+    def _sample_lead_time(self) -> int:
+        lead_time_params = self.params.lead_time_params
+        dist_type = lead_time_params.get('type', 'exponential')
+
+        if dist_type == 'empirical':
+            support = lead_time_params.get('support')
+            probabilities = lead_time_params.get('probabilities')
+            if support is not None and probabilities is not None and len(support) == len(probabilities) and len(support) > 0:
+                lead_time = int(np.random.choice(support, p=probabilities))
+                return max(0, min(lead_time, self.booking_window_days - 1))
+
+        mean = float(lead_time_params.get('mean', 104.0))
+        lead_time = int(np.random.exponential(mean))
+        return max(0, min(lead_time, self.booking_window_days - 1))
+
     def _generate_customer_profile(self, current_day: int) -> CustomerProfile:
         """
         生成单个客户的特征向量
@@ -330,14 +346,7 @@ class HotelABMModel(Model):
         Returns:
             客户特征配置
         """
-        # 1. 提前预订期 L_i ~ Exp(μ_lead)
-        #lead_time_mean = self.params['lead_time_params']['mean']
-        #lead_time = int(np.random.exponential(lead_time_mean))
-        #lead_time = max(0, min(lead_time, 365))  # 限制在0-365天
-        # ✅ 1. 提前预订期 L_i：限制在预订窗口内（0-4天，即今天到第5天）
-        # 原来：可以预订未来365天
-        # 现在：只能预订未来5天（包括今天）
-        lead_time = np.random.randint(0, self.booking_window_days)  # 0, 1, 2, 3, 4
+        lead_time = self._sample_lead_time()
         
         # 2. 目标入住日期 T_stay = CurrentDate + L
         target_date = current_day + lead_time
@@ -393,23 +402,17 @@ class HotelABMModel(Model):
         # 按day_offset统计预订信息（用于强化学习更新）
         bookings_by_day_offset = [
             {'day_offset': i, 'bookings_online': 0, 'bookings_offline': 0, 'revenue_online': 0.0, 'revenue_offline': 0.0}
-            for i in range(5)
+            for i in range(self.booking_window_days)
         ]
         
         # 客户决策阶段
         for customer in daily_customers:
             target_date = customer.profile.target_date
-            days_ahead = target_date - self.current_day  # 0, 1, 2, 3, 4
-            
-            # ✅ 根据客户的target_date从价格窗口中选择对应的价格
-            #if 0 <= days_ahead < len(self.price_window_online):
-            #    if customer.profile.customer_type == 'online':
-            #        price = self.price_window_online[days_ahead]
-            #    else:
-            #        price = self.price_window_offline[days_ahead]
-            #else:
-            #    # 超出预订窗口，跳过该客户
-            #    continue
+            days_ahead = target_date - self.current_day
+
+            if not (0 <= days_ahead < self.booking_window_days):
+                continue
+
             online_price = self.price_window_online[days_ahead]
             offline_price = self.price_window_offline[days_ahead]
 
@@ -432,7 +435,7 @@ class HotelABMModel(Model):
                         new_bookings_offline += 1
                     
                     # 统计按day_offset分组的预订信息
-                    if 0 <= days_ahead < 5:
+                    if 0 <= days_ahead < self.booking_window_days:
                         if customer.profile.customer_type == 'online':
                             bookings_by_day_offset[days_ahead]['bookings_online'] += 1
                             bookings_by_day_offset[days_ahead]['revenue_online'] += customer.booking_record.paid_price

@@ -10,7 +10,7 @@
 
 import numpy as np
 import pandas as pd
-from typing import Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict
 from datetime import datetime
 import os
 from tensorboardX import SummaryWriter
@@ -21,10 +21,76 @@ from src.agent.hotel_agent_dual_channel import HotelAgentDualChannel
 from src.agent.ota_agent import OTAAgent
 
 
+def _default_buckets(n: int) -> List[Tuple[int, int]]:
+    if n <= 0:
+        return []
+    if n <= 5:
+        return [(i, i) for i in range(n)]
+    edges = [0, 1, 2, 4, 7, 14, 30, 60, n]
+    buckets: List[Tuple[int, int]] = []
+    for i in range(len(edges) - 1):
+        s = edges[i]
+        e_excl = min(edges[i + 1], n)
+        if s < n and e_excl > s:
+            buckets.append((s, e_excl - 1))
+    if buckets[0][0] != 0:
+        buckets = [(0, buckets[0][0] - 1)] + buckets
+    if buckets[-1][1] != n - 1:
+        buckets[-1] = (buckets[-1][0], n - 1)
+    merged: List[Tuple[int, int]] = []
+    for s, e in buckets:
+        if not merged:
+            merged.append((s, e))
+            continue
+        ps, pe = merged[-1]
+        if s <= pe + 1:
+            merged[-1] = (ps, max(pe, e))
+        else:
+            merged.append((s, e))
+    for i in range(1, len(merged)):
+        if merged[i][0] != merged[i - 1][1] + 1:
+            raise ValueError("Buckets must be contiguous")
+    if merged[0][0] != 0 or merged[-1][1] != n - 1:
+        raise ValueError(f"Buckets must cover 0..{n-1}")
+    return merged
+
+
+def _parse_buckets(spec: Optional[str], n: int) -> List[Tuple[int, int]]:
+    if n <= 5:
+        return [(i, i) for i in range(max(0, n))]
+
+    if spec is None or str(spec).strip() == "":
+        return _default_buckets(n)
+    tokens = [t.strip() for t in str(spec).replace(',', '|').split('|') if t.strip()]
+    buckets: List[Tuple[int, int]] = []
+    for t in tokens:
+        if '-' in t:
+            a, b = t.split('-', 1)
+            s, e = int(a), int(b)
+        else:
+            s = e = int(t)
+        buckets.append((s, e))
+    buckets.sort(key=lambda x: x[0])
+    if not buckets:
+        return _default_buckets(n)
+    if buckets[0][0] != 0:
+        raise ValueError("Buckets must start at 0")
+    if buckets[-1][1] != n - 1:
+        raise ValueError(f"Buckets must end at {n-1}")
+    for i, (s, e) in enumerate(buckets):
+        if s < 0 or e < s or e >= n:
+            raise ValueError(f"Invalid bucket: {(s, e)}")
+        if i > 0 and s != buckets[i - 1][1] + 1:
+            raise ValueError("Buckets must be contiguous")
+    return buckets
+
+
 def train_game_system(historical_data: pd.DataFrame, 
                       episodes: int = 100,
                       training_mode: str = 'simultaneous',
-                      update_frequency: int = 10) -> Tuple[HotelAgentDualChannel, OTAAgent, List, List, List]:
+                      update_frequency: int = 10,
+                      booking_window_days: int = 5,
+                      decision_buckets: str = '') -> Tuple[HotelAgentDualChannel, OTAAgent, List, List, List]:
     """
     训练酒店-OTA博弈系统
     
@@ -51,7 +117,8 @@ def train_game_system(historical_data: pd.DataFrame,
     # 创建环境
     env = HotelEnvironment(
         initial_inventory=ENV_CONFIG.initial_inventory,
-        historical_data=historical_data
+        historical_data=historical_data,
+        booking_window_days=booking_window_days
     )
     
     # 创建酒店Agent
@@ -116,168 +183,135 @@ def train_game_system(historical_data: pd.DataFrame,
         # 是否是最后一个episode（用于记录详细数据）
         is_last_episode = (episode == episodes - 1)
         
-        # 365天模拟
+        buckets = _parse_buckets(decision_buckets, booking_window_days)
+        train_hotel = training_mode in ('simultaneous', 'fixed_ota') or (training_mode == 'alternating' and episode % 2 == 0)
+        train_ota = training_mode == 'simultaneous' or (training_mode == 'alternating' and episode % 2 == 1)
+
         for day in range(365):
-            # 1. 为未来5天构建状态窗口和决策
             price_online_base_window = []
             price_offline_window = []
             subsidy_ratio_window = []
-            
-            for day_offset in range(5):  # Day0, Day1, Day2, Day3, Day4
-                # 获取该天的状态
-                state_for_day = env._get_state_for_day_offset(day_offset)
-                
-                # 1.1 酒店决策该天的线上基础价格和线下价格
-                action_hotel = hotel_agent.select_action(state_for_day, deterministic=False)
-                price_online_base, price_offline = action_hotel
-                
-                # 1.2 OTA决策该天的补贴比例
+            bucket_decisions = []
+
+            for start, end in buckets:
+                state_bucket = env._get_state_for_day_offset(start)
+                price_online_base, price_offline = hotel_agent.select_action(state_bucket, deterministic=False)
+
                 if training_mode == 'fixed_ota':
-                    # 固定OTA策略：基于价格差异的简单规则
                     price_gap = price_offline - price_online_base
                     if price_gap > 20:
-                        subsidy_ratio = 0.2  # 补贴佣金的20%
+                        subsidy_ratio = 0.2
                     elif price_gap > 10:
-                        subsidy_ratio = 0.5  # 补贴佣金的50%
+                        subsidy_ratio = 0.5
                     else:
-                        subsidy_ratio = 0.7  # 补贴佣金的70%
+                        subsidy_ratio = 0.7
                 else:
-                    # 使用OTA Agent决策补贴比例
-                    subsidy_ratio = ota_agent.select_action(
-                        price_online_base, price_offline, state_for_day, deterministic=False
-                    )
-                
-                # 保存决策
-                price_online_base_window.append(price_online_base)
-                price_offline_window.append(price_offline)
-                subsidy_ratio_window.append(subsidy_ratio)
-            
-            # 2. 计算5天的补贴金额和最终线上价格
+                    subsidy_ratio = ota_agent.select_action(price_online_base, price_offline, state_bucket, deterministic=False)
+
+                span = end - start + 1
+                price_online_base_window.extend([float(price_online_base)] * span)
+                price_offline_window.extend([float(price_offline)] * span)
+                subsidy_ratio_window.extend([float(subsidy_ratio)] * span)
+                bucket_decisions.append((state_bucket, float(price_online_base), float(price_offline), float(subsidy_ratio), span))
+
+            price_online_base_window = price_online_base_window[:booking_window_days]
+            price_offline_window = price_offline_window[:booking_window_days]
+            subsidy_ratio_window = subsidy_ratio_window[:booking_window_days]
+
             price_online_final_window = []
             subsidy_amount_window = []
-            
-            for i in range(5):
-                # 预估佣金收入（假设有预订）
-                estimated_commission = price_online_base_window[i] * RL_CONFIG.commission_rate
-                # 补贴金额 = 佣金 * 补贴比例
-                subsidy_amount = estimated_commission * subsidy_ratio_window[i]
-                # 最终线上价格
-                price_online_final = price_online_base_window[i] - subsidy_amount
-                
-                price_online_final_window.append(price_online_final)
+            for i in range(booking_window_days):
+                subsidy_amount = price_online_base_window[i] * RL_CONFIG.commission_rate * subsidy_ratio_window[i]
+                price_online_final_window.append(price_online_base_window[i] - subsidy_amount)
                 subsidy_amount_window.append(subsidy_amount)
-            
-            # 3. 环境执行（传入5天的价格窗口）
-            # 构建动作：5个[price_online_final, price_offline]对
-            actions_window = [[price_online_final_window[i], price_offline_window[i]] for i in range(5)]
+
+            actions_window = [[price_online_final_window[i], price_offline_window[i]] for i in range(booking_window_days)]
             next_state, reward, done, info = env.step(actions_window)
-            
-            # 4. 获取按day_offset分组的预订信息
+
             bookings_by_day_offset = info.get('bookings_by_day_offset', [])
-            
-            # 5. 对每个day_offset进行独立更新（每个仿真天更新5次）
-            for day_offset in range(5):
-                # 提取该day_offset的数据
-                if day_offset < len(bookings_by_day_offset):
-                    booking_info = bookings_by_day_offset[day_offset]
-                    bookings_online = booking_info['bookings_online']
-                    bookings_offline = booking_info['bookings_offline']
-                else:
-                    # 如果没有该day_offset的数据，跳过
+
+            offset_idx = 0
+            for state_bucket, price_online_base, price_offline, subsidy_ratio, span in bucket_decisions:
+                if offset_idx >= len(bookings_by_day_offset):
+                    break
+
+                end_idx = min(offset_idx + span, len(bookings_by_day_offset))
+                bookings_online = sum(bookings_by_day_offset[j]['bookings_online'] for j in range(offset_idx, end_idx))
+                bookings_offline = sum(bookings_by_day_offset[j]['bookings_offline'] for j in range(offset_idx, end_idx))
+                offset_idx = end_idx
+
+                if bookings_online == 0 and bookings_offline == 0:
                     continue
-                
-                # 该day_offset的状态、价格和补贴比例
-                state_for_day = env._get_state_for_day_offset(day_offset)
-                price_online_base = price_online_base_window[day_offset]
-                price_offline = price_offline_window[day_offset]
-                subsidy_ratio = subsidy_ratio_window[day_offset]
-                
-                # 计算该day_offset的收益
-                revenue_hotel = hotel_agent.calculate_revenue(
-                    bookings_online, bookings_offline,
-                    price_online_base, price_offline
-                )
-                
-                profit_ota = ota_agent.calculate_profit(
-                    bookings_online, price_online_base, subsidy_ratio
-                )
-                
-                # 计算实际补贴金额
-                actual_subsidy_amount = (bookings_online * price_online_base * 
-                                        RL_CONFIG.commission_rate * subsidy_ratio)
-                
-                # 计算系统总收益
+
+                revenue_hotel = hotel_agent.calculate_revenue(bookings_online, bookings_offline, price_online_base, price_offline)
+                profit_ota = ota_agent.calculate_profit(bookings_online, price_online_base, subsidy_ratio)
+                actual_subsidy_amount = bookings_online * price_online_base * RL_CONFIG.commission_rate * subsidy_ratio
+
                 total_system_profit = revenue_hotel + profit_ota
-                
-                # 计算混合奖励（解决量纲问题）
-                # 对酒店：系统总收益直接使用，因为酒店收益已经是大头
-                reward_hotel = (RL_CONFIG.reward_hotel_ratio * revenue_hotel + 
-                               (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit)
-                reward_ota = (RL_CONFIG.reward_ota_ratio * profit_ota + 
-                             (1 - RL_CONFIG.reward_ota_ratio) * total_system_profit)
-                
-                # 更新酒店Agent（使用混合奖励）
-                action_hotel = np.array([price_online_base, price_offline])
-                hotel_agent.update(state_for_day, action_hotel, reward_hotel, next_state, done, actual_subsidy_amount)
-                
-                # 更新OTA Agent（除非是fixed_ota模式，使用混合奖励）
-                if training_mode != 'fixed_ota':
-                    ota_agent.update(
-                        price_online_base, price_offline, state_for_day,
-                        subsidy_ratio, reward_ota, next_state, done
-                    )
-            
-            # 6. 累积统计（使用总预订量）
+                reward_hotel = RL_CONFIG.reward_hotel_ratio * revenue_hotel + (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit
+                reward_ota = RL_CONFIG.reward_ota_ratio * profit_ota + (1 - RL_CONFIG.reward_ota_ratio) * total_system_profit
+
+                if train_hotel:
+                    hotel_agent.update(state_bucket, np.array([price_online_base, price_offline]), reward_hotel, next_state, done, actual_subsidy_amount)
+                if train_ota and training_mode != 'fixed_ota':
+                    ota_agent.update(price_online_base, price_offline, state_bucket, subsidy_ratio, reward_ota, next_state, done)
+
+            revenue_hotel_day = 0.0
+            profit_ota_day = 0.0
+            actual_subsidy_amount_day = 0.0
+
+            max_len = min(len(bookings_by_day_offset), booking_window_days)
+            for i in range(max_len):
+                bo = bookings_by_day_offset[i]['bookings_online']
+                bf = bookings_by_day_offset[i]['bookings_offline']
+                if bo == 0 and bf == 0:
+                    continue
+                pob = price_online_base_window[i]
+                pof = price_offline_window[i]
+                sr = subsidy_ratio_window[i]
+                revenue_hotel_day += hotel_agent.calculate_revenue(bo, bf, pob, pof)
+                profit_ota_day += ota_agent.calculate_profit(bo, pob, sr)
+                actual_subsidy_amount_day += bo * pob * RL_CONFIG.commission_rate * sr
+
             total_bookings_online_day = info.get('new_bookings_online', 0)
             total_bookings_offline_day = info.get('new_bookings_offline', 0)
-            
-            # 计算当天总收益（用于显示）
-            revenue_hotel_day = hotel_agent.calculate_revenue(
-                total_bookings_online_day, total_bookings_offline_day,
-                price_online_base_window[0], price_offline_window[0]
-            )
-            profit_ota_day = ota_agent.calculate_profit(
-                total_bookings_online_day, price_online_base_window[0], subsidy_ratio_window[0]
-            )
-            actual_subsidy_amount_day = (total_bookings_online_day * price_online_base_window[0] * 
-                                        RL_CONFIG.commission_rate * subsidy_ratio_window[0])
-            
+
             total_reward_hotel += revenue_hotel_day
             total_reward_ota += profit_ota_day
             total_bookings_online += total_bookings_online_day
             total_bookings_offline += total_bookings_offline_day
             total_subsidy += actual_subsidy_amount_day
-            
-            # 保存最后一天的补贴比例用于统计
-            last_subsidy_ratio = subsidy_ratio_window[0]
-            
-            # 如果是最后一个episode，记录每日详细数据到TensorBoard
+
+            last_subsidy_ratio = subsidy_ratio_window[0] if subsidy_ratio_window else 0.0
+
             if is_last_episode:
                 # 记录价格数据
                 writer.add_scalar('LastEpisode/Price_Online_Base', price_online_base_window[0], day)
                 writer.add_scalar('LastEpisode/Price_Online_Final', price_online_final_window[0], day)
                 writer.add_scalar('LastEpisode/Price_Offline', price_offline_window[0], day)
-                
-                # 记录补贴数据
-                writer.add_scalar('LastEpisode/Subsidy_Ratio', subsidy_ratio_window[0] * 100, day)  # 百分比
+                writer.add_scalar('LastEpisode/Subsidy_Ratio', last_subsidy_ratio * 100, day)
                 writer.add_scalar('LastEpisode/Subsidy_Amount', subsidy_amount_window[0], day)
-                
                 # 记录预订数据
                 writer.add_scalar('LastEpisode/Bookings_Online', total_bookings_online_day, day)
                 writer.add_scalar('LastEpisode/Bookings_Offline', total_bookings_offline_day, day)
-                
                 # 记录收益数据
                 writer.add_scalar('LastEpisode/Revenue_Hotel', revenue_hotel_day, day)
                 writer.add_scalar('LastEpisode/Profit_OTA', profit_ota_day, day)
-            
+
+            if update_frequency > 0 and (day + 1) % update_frequency == 0:
+                if train_hotel:
+                    hotel_agent.end_episode()
+                if train_ota and training_mode != 'fixed_ota':
+                    ota_agent.end_episode()
+
             state = next_state
             if done:
                 break
         
-        # Episode结束时最后一次更新（如果最后几天没有触发更新）
-        if 365 % update_frequency != 0:
-            hotel_agent.end_episode()
-            if training_mode != 'fixed_ota':
+        if update_frequency <= 0 or 365 % update_frequency != 0:
+            if train_hotel:
+                hotel_agent.end_episode()
+            if train_ota and training_mode != 'fixed_ota':
                 ota_agent.end_episode()
         
         # 记录

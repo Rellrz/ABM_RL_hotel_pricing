@@ -30,6 +30,8 @@ def main():
     parser.add_argument('--commission', type=float, default=0.15, help='OTA佣金率')
     parser.add_argument('--subsidy-ratio-max', type=float, default=0.8, help='最大补贴比例（占佣金的百分比）')
     parser.add_argument('--update-frequency', type=int, default=30, help='CEM参数更新频率（每N天更新一次）')
+    parser.add_argument('--booking-window-days', type=int, default=91, help='预订窗口长度（0-90天对应91）')
+    parser.add_argument('--decision-buckets', type=str, default='0|1|2-3|4-6|7-13|14-29|30-59|60-90', help='提前期分桶，如: 0|1|2-3|4-6|7-13|14-29|30-59|60-90（为空则自动生成）')
     
     args = parser.parse_args()
     
@@ -41,6 +43,9 @@ def main():
     print(f"佣金率: {args.commission * 100:.1f}%")
     print(f"补贴比例范围: 0%-{args.subsidy_ratio_max * 100:.0f}%")
     print(f"CEM更新频率: 每{args.update_frequency}天更新一次")
+    print(f"预订窗口: 0-{args.booking_window_days - 1}天")
+    if str(args.decision_buckets).strip():
+        print(f"提前期分桶: {args.decision_buckets}")
     
     # 更新配置
     RL_CONFIG.commission_rate = args.commission
@@ -57,7 +62,9 @@ def main():
         historical_data=historical_data,
         episodes=args.episodes,
         training_mode=args.mode,
-        update_frequency=args.update_frequency
+        update_frequency=args.update_frequency,
+        booking_window_days=args.booking_window_days,
+        decision_buckets=args.decision_buckets,
     )
     
     # 保存结果
