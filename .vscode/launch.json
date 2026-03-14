@@ -17,7 +17,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/experiments/train_game.py",
-            "args": ["--episodes", "100"],
+            "args": ["--episodes", "10"],
             "console": "integratedTerminal"
         },
         {
