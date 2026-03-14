@@ -183,7 +183,7 @@ class ABMConfig:
     urgency_weight: float = 20
     noise_std: float = 12.0
     booking_threshold: float = -15
-    customer_type_ratio: Tuple[float, float] = (0.7, 0.3) #(ota_channel, ota and direct channel)
+    customer_type_ratio: Tuple[float, float] = (0.3, 0.7) #(ota_channel, ota and direct channel)
     online_discount_ratio: float = 0.8
     
     regret_coefficient: float = 0.75
@@ -279,8 +279,8 @@ class RLConfig:
 class EnvConfig:
     """酒店环境参数，模拟真实的酒店运营环境"""
     
-    initial_inventory: int = 250
-    max_inventory: int = 250
+    initial_inventory: int = 200
+    max_inventory: int = 200
     min_inventory: int = 0
 
     booking_window_days: int = 91
@@ -406,12 +406,17 @@ def validate_config() -> bool:
         print("错误：初始库存必须大于0")
         return False
     
-    if len(online_price_levels) != 6 or len(offline_price_levels) != 6:
-        print("错误：线上和线下价格档位都必须为6个")
+    if len(online_price_levels) <= 0 or len(offline_price_levels) <= 0:
+        print("错误：线上和线下价格档位都必须大于0个")
         return False
     
-    if n_actions != 36:
-        print("错误：动作数量必须为36（6×6组合）")
+    expected_actions = len(online_price_levels) * len(offline_price_levels)
+    if n_actions != expected_actions:
+        print(f"错误：动作数量必须为{expected_actions}（线上{len(online_price_levels)}×线下{len(offline_price_levels)}组合）")
+        return False
+    
+    if RL_CONFIG.n_actions != n_actions:
+        print(f"错误：RL_CONFIG.n_actions({RL_CONFIG.n_actions}) 必须与 ENV_CONFIG.n_actions({n_actions}) 一致")
         return False
     
     return True

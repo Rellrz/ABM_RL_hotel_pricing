@@ -114,16 +114,18 @@ def train_game_system(historical_data: pd.DataFrame,
     print(f"佣金率: {RL_CONFIG.commission_rate * 100:.1f}%")
     print(f"补贴比例范围: {RL_CONFIG.subsidy_ratio_min * 100:.1f}% - {RL_CONFIG.subsidy_ratio_max * 100:.1f}%")
     
-    # 创建环境
+    buckets = _parse_buckets(decision_buckets, booking_window_days)
+    n_stages = len(buckets) if buckets else 1
+
     env = HotelEnvironment(
         initial_inventory=ENV_CONFIG.initial_inventory,
         historical_data=historical_data,
         booking_window_days=booking_window_days
     )
     
-    # 创建酒店Agent
+    # 创建酒店Agent（18×K）
     hotel_agent = HotelAgentDualChannel(
-        n_states=RL_CONFIG.n_states,
+        n_states=18 * n_stages,
         commission_rate=RL_CONFIG.commission_rate,
         online_price_min=RL_CONFIG.online_price_min,
         online_price_max=RL_CONFIG.online_price_max,
@@ -136,12 +138,12 @@ def train_game_system(historical_data: pd.DataFrame,
         std_decay=RL_CONFIG.std_decay
     )
     
-    # 创建OTA Agent
+    # 创建OTA Agent（90×K）
     ota_agent = OTAAgent(
         commission_rate=RL_CONFIG.commission_rate,
         subsidy_ratio_min=RL_CONFIG.subsidy_ratio_min,
         subsidy_ratio_max=RL_CONFIG.subsidy_ratio_max,
-        n_states=90,  # OTA状态空间：5(price_gap) × 3(inventory) × 3(season) × 2(weekday) = 90
+        n_states=90 * n_stages,
         n_samples=RL_CONFIG.cem_n_samples,
         elite_frac=RL_CONFIG.cem_elite_frac,
         initial_std=0.2,
@@ -183,7 +185,6 @@ def train_game_system(historical_data: pd.DataFrame,
         # 是否是最后一个episode（用于记录详细数据）
         is_last_episode = (episode == episodes - 1)
         
-        buckets = _parse_buckets(decision_buckets, booking_window_days)
         train_hotel = training_mode in ('simultaneous', 'fixed_ota') or (training_mode == 'alternating' and episode % 2 == 0)
         train_ota = training_mode == 'simultaneous' or (training_mode == 'alternating' and episode % 2 == 1)
 
@@ -193,8 +194,9 @@ def train_game_system(historical_data: pd.DataFrame,
             subsidy_ratio_window = []
             bucket_decisions = []
 
-            for start, end in buckets:
-                state_bucket = env._get_state_for_day_offset(start)
+            for stage_id, (start, end) in enumerate(buckets):
+                state_bucket = dict(env._get_state_for_day_offset(start))
+                state_bucket['stage_id'] = int(stage_id)
                 price_online_base, price_offline = hotel_agent.select_action(state_bucket, deterministic=False)
 
                 if training_mode == 'fixed_ota':
@@ -212,7 +214,7 @@ def train_game_system(historical_data: pd.DataFrame,
                 price_online_base_window.extend([float(price_online_base)] * span)
                 price_offline_window.extend([float(price_offline)] * span)
                 subsidy_ratio_window.extend([float(subsidy_ratio)] * span)
-                bucket_decisions.append((state_bucket, float(price_online_base), float(price_offline), float(subsidy_ratio), span))
+                bucket_decisions.append((int(stage_id), int(start), state_bucket, float(price_online_base), float(price_offline), float(subsidy_ratio), span))
 
             price_online_base_window = price_online_base_window[:booking_window_days]
             price_offline_window = price_offline_window[:booking_window_days]
@@ -231,7 +233,7 @@ def train_game_system(historical_data: pd.DataFrame,
             bookings_by_day_offset = info.get('bookings_by_day_offset', [])
 
             offset_idx = 0
-            for state_bucket, price_online_base, price_offline, subsidy_ratio, span in bucket_decisions:
+            for stage_id, start, state_bucket, price_online_base, price_offline, subsidy_ratio, span in bucket_decisions:
                 if offset_idx >= len(bookings_by_day_offset):
                     break
 
@@ -243,6 +245,9 @@ def train_game_system(historical_data: pd.DataFrame,
                 if bookings_online == 0 and bookings_offline == 0:
                     continue
 
+                next_state_bucket = dict(env._get_state_for_day_offset(start))
+                next_state_bucket['stage_id'] = int(stage_id)
+
                 revenue_hotel = hotel_agent.calculate_revenue(bookings_online, bookings_offline, price_online_base, price_offline)
                 profit_ota = ota_agent.calculate_profit(bookings_online, price_online_base, subsidy_ratio)
                 actual_subsidy_amount = bookings_online * price_online_base * RL_CONFIG.commission_rate * subsidy_ratio
@@ -252,9 +257,9 @@ def train_game_system(historical_data: pd.DataFrame,
                 reward_ota = RL_CONFIG.reward_ota_ratio * profit_ota + (1 - RL_CONFIG.reward_ota_ratio) * total_system_profit
 
                 if train_hotel:
-                    hotel_agent.update(state_bucket, np.array([price_online_base, price_offline]), reward_hotel, next_state, done, actual_subsidy_amount)
+                    hotel_agent.update(state_bucket, np.array([price_online_base, price_offline]), reward_hotel, next_state_bucket, done, actual_subsidy_amount)
                 if train_ota and training_mode != 'fixed_ota':
-                    ota_agent.update(price_online_base, price_offline, state_bucket, subsidy_ratio, reward_ota, next_state, done)
+                    ota_agent.update(price_online_base, price_offline, state_bucket, subsidy_ratio, reward_ota, next_state_bucket, done)
 
             revenue_hotel_day = 0.0
             profit_ota_day = 0.0

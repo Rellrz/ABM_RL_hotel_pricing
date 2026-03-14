@@ -27,7 +27,7 @@ def main():
     parser.add_argument('--mode', type=str, default='simultaneous', 
                        choices=['fixed_ota', 'alternating', 'simultaneous'],
                        help='训练模式')
-    parser.add_argument('--commission', type=float, default=0.15, help='OTA佣金率')
+    parser.add_argument('--commission', type=float, default=0.20, help='OTA佣金率')
     parser.add_argument('--subsidy-ratio-max', type=float, default=0.8, help='最大补贴比例（占佣金的百分比）')
     parser.add_argument('--update-frequency', type=int, default=30, help='CEM参数更新频率（每N天更新一次）')
     parser.add_argument('--booking-window-days', type=int, default=91, help='预订窗口长度（0-90天对应91）')

@@ -67,7 +67,9 @@ class OTAAgent:
         self.commission_rate = commission_rate
         self.subsidy_ratio_min = subsidy_ratio_min
         self.subsidy_ratio_max = subsidy_ratio_max
-        self.n_states = n_states
+        self.n_states = int(n_states)
+        self.n_base_states = 90
+        self.n_stages = max(1, self.n_states // self.n_base_states)
         self.algorithm_type = RL_CONFIG.cem_algorithm
         
         # 根据配置选择算法
@@ -75,7 +77,7 @@ class OTAAgent:
             # 使用神经网络版CEM（针对补贴比例的小范围，使用更小的标准差）
             # 补贴范围0-0.8，使用initial_std=0.1, min_std=0.02来控制波动
             self.cem = NeuralCrossEntropyMethod(
-                state_dim=RL_CONFIG.cem_nn_state_dim,
+                state_dim=self.n_states,
                 action_dim=1,
                 action_min=subsidy_ratio_min,
                 action_max=subsidy_ratio_max,
@@ -153,14 +155,16 @@ class OTAAgent:
         
 
         
-        # 组合状态索引
-        # 状态空间 = 5(price_gap) × 3(inventory) × 3(season) × 2(weekday) = 90
-        state_idx = (price_gap_level * 3 * 3 * 2 + 
-                    inventory_level * 3 * 2 + 
-                    season * 2 + 
-                    weekday)
-        
-        return state_idx
+        base_state_idx = (price_gap_level * 3 * 3 * 2 + 
+                         inventory_level * 3 * 2 + 
+                         season * 2 + 
+                         weekday)
+
+        stage_id = int(env_state.get('stage_id', 0))
+        stage_id = int(np.clip(stage_id, 0, self.n_stages - 1))
+
+        state_idx = base_state_idx * self.n_stages + stage_id
+        return int(state_idx)
     
     def select_action(self, 
                      hotel_price_online: float, 
