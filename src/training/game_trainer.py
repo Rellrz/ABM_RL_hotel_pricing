@@ -20,47 +20,10 @@ from src.environment.hotel_env import HotelEnvironment
 from src.agent.hotel_agent_dual_channel import HotelAgentDualChannel
 from src.agent.ota_agent import OTAAgent
 
-
-def _default_buckets(n: int) -> List[Tuple[int, int]]:
-    if n <= 0:
-        return []
-    if n <= 5:
-        return [(i, i) for i in range(n)]
-    edges = [0, 1, 2, 4, 7, 14, 30, 60, n]
-    buckets: List[Tuple[int, int]] = []
-    for i in range(len(edges) - 1):
-        s = edges[i]
-        e_excl = min(edges[i + 1], n)
-        if s < n and e_excl > s:
-            buckets.append((s, e_excl - 1))
-    if buckets[0][0] != 0:
-        buckets = [(0, buckets[0][0] - 1)] + buckets
-    if buckets[-1][1] != n - 1:
-        buckets[-1] = (buckets[-1][0], n - 1)
-    merged: List[Tuple[int, int]] = []
-    for s, e in buckets:
-        if not merged:
-            merged.append((s, e))
-            continue
-        ps, pe = merged[-1]
-        if s <= pe + 1:
-            merged[-1] = (ps, max(pe, e))
-        else:
-            merged.append((s, e))
-    for i in range(1, len(merged)):
-        if merged[i][0] != merged[i - 1][1] + 1:
-            raise ValueError("Buckets must be contiguous")
-    if merged[0][0] != 0 or merged[-1][1] != n - 1:
-        raise ValueError(f"Buckets must cover 0..{n-1}")
-    return merged
-
-
 def _parse_buckets(spec: Optional[str], n: int) -> List[Tuple[int, int]]:
     if n <= 5:
         return [(i, i) for i in range(max(0, n))]
 
-    if spec is None or str(spec).strip() == "":
-        return _default_buckets(n)
     tokens = [t.strip() for t in str(spec).replace(',', '|').split('|') if t.strip()]
     buckets: List[Tuple[int, int]] = []
     for t in tokens:
@@ -71,8 +34,7 @@ def _parse_buckets(spec: Optional[str], n: int) -> List[Tuple[int, int]]:
             s = e = int(t)
         buckets.append((s, e))
     buckets.sort(key=lambda x: x[0])
-    if not buckets:
-        return _default_buckets(n)
+
     if buckets[0][0] != 0:
         raise ValueError("Buckets must start at 0")
     if buckets[-1][1] != n - 1:
