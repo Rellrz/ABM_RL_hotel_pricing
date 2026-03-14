@@ -279,8 +279,8 @@ class RLConfig:
 class EnvConfig:
     """酒店环境参数，模拟真实的酒店运营环境"""
     
-    initial_inventory: int = 200
-    max_inventory: int = 200
+    initial_inventory: int = 100
+    max_inventory: int = 100
     min_inventory: int = 0
 
     booking_window_days: int = 91

@@ -136,109 +136,145 @@ def train_game_system(historical_data: pd.DataFrame,
     print(f"💡 查看训练曲线: tensorboard --logdir={PATH_CONFIG.tensorboard_dir}")
     
     for episode in range(episodes):
-        state = env.reset()
-        
+        env.reset()
+
         total_reward_hotel = 0.0
         total_reward_ota = 0.0
         total_bookings_online = 0
         total_bookings_offline = 0
         total_subsidy = 0.0
-        
-        # 是否是最后一个episode（用于记录详细数据）
+
         is_last_episode = (episode == episodes - 1)
-        
+
+        bucket_of_offset = [0] * booking_window_days
+        for sid, (s, e) in enumerate(buckets):
+            for off in range(int(s), min(int(e) + 1, booking_window_days)):
+                bucket_of_offset[off] = int(sid)
+
+        trigger_offsets = sorted({int(e) for _, e in buckets if 0 <= int(e) < booking_window_days})
+
         train_hotel = training_mode in ('simultaneous', 'fixed_ota') or (training_mode == 'alternating' and episode % 2 == 0)
         train_ota = training_mode == 'simultaneous' or (training_mode == 'alternating' and episode % 2 == 1)
 
-        for day in range(365):
-            price_online_base_window = []
-            price_offline_window = []
-            subsidy_ratio_window = []
-            bucket_decisions = []
+        price_online_base_by_offset = [0.0] * booking_window_days
+        price_offline_by_offset = [0.0] * booking_window_days
+        subsidy_ratio_by_offset = [0.0] * booking_window_days
+        decision_state_by_offset = [None] * booking_window_days
+        acc_bookings_online_by_offset = [0] * booking_window_days
+        acc_bookings_offline_by_offset = [0] * booking_window_days
 
-            for stage_id, (start, end) in enumerate(buckets):
-                state_bucket = dict(env._get_state_for_day_offset(start))
-                state_bucket['stage_id'] = int(stage_id)
-                price_online_base, price_offline = hotel_agent.select_action(state_bucket, deterministic=False)
+        for sid, (s, e) in enumerate(buckets):
+            ref_off = int(min(int(e), booking_window_days - 1))
+            st = dict(env._get_state_for_day_offset(ref_off))
+            st['stage_id'] = int(sid)
 
-                if training_mode == 'fixed_ota':
-                    price_gap = price_offline - price_online_base
-                    if price_gap > 20:
-                        subsidy_ratio = 0.2
-                    elif price_gap > 10:
-                        subsidy_ratio = 0.5
-                    else:
-                        subsidy_ratio = 0.7
+            pob, pof = hotel_agent.select_action(st, deterministic=False)
+            if training_mode == 'fixed_ota':
+                gap = pof - pob
+                if gap > 20:
+                    sr = 0.2
+                elif gap > 10:
+                    sr = 0.5
                 else:
-                    subsidy_ratio = ota_agent.select_action(price_online_base, price_offline, state_bucket, deterministic=False)
+                    sr = 0.7
+            else:
+                sr = ota_agent.select_action(pob, pof, st, deterministic=False)
 
-                span = end - start + 1
-                price_online_base_window.extend([float(price_online_base)] * span)
-                price_offline_window.extend([float(price_offline)] * span)
-                subsidy_ratio_window.extend([float(subsidy_ratio)] * span)
-                bucket_decisions.append((int(stage_id), int(start), state_bucket, float(price_online_base), float(price_offline), float(subsidy_ratio), span))
+            for off in range(int(s), min(int(e) + 1, booking_window_days)):
+                price_online_base_by_offset[off] = float(pob)
+                price_offline_by_offset[off] = float(pof)
+                subsidy_ratio_by_offset[off] = float(sr)
+                decision_state_by_offset[off] = dict(st)
 
-            price_online_base_window = price_online_base_window[:booking_window_days]
-            price_offline_window = price_offline_window[:booking_window_days]
-            subsidy_ratio_window = subsidy_ratio_window[:booking_window_days]
+        for day in range(365):
+            for off in trigger_offsets:
+                bo_acc = int(acc_bookings_online_by_offset[off])
+                bf_acc = int(acc_bookings_offline_by_offset[off])
+                if (bo_acc > 0 or bf_acc > 0) and decision_state_by_offset[off] is not None:
+                    pob_prev = float(price_online_base_by_offset[off])
+                    pof_prev = float(price_offline_by_offset[off])
+                    sr_prev = float(subsidy_ratio_by_offset[off])
 
-            price_online_final_window = []
-            subsidy_amount_window = []
-            for i in range(booking_window_days):
-                subsidy_amount = price_online_base_window[i] * RL_CONFIG.commission_rate * subsidy_ratio_window[i]
-                price_online_final_window.append(price_online_base_window[i] - subsidy_amount)
-                subsidy_amount_window.append(subsidy_amount)
+                    revenue_hotel_acc = bo_acc * pob_prev * (1 - RL_CONFIG.commission_rate) + bf_acc * pof_prev
+                    commission_revenue_acc = bo_acc * pob_prev * RL_CONFIG.commission_rate
+                    subsidy_cost_acc = commission_revenue_acc * sr_prev
+                    profit_ota_acc = commission_revenue_acc - subsidy_cost_acc
 
-            actions_window = [[price_online_final_window[i], price_offline_window[i]] for i in range(booking_window_days)]
-            next_state, reward, done, info = env.step(actions_window)
+                    total_system_profit_acc = revenue_hotel_acc + profit_ota_acc
+                    reward_hotel_acc = RL_CONFIG.reward_hotel_ratio * revenue_hotel_acc + (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit_acc
+                    reward_ota_acc = RL_CONFIG.reward_ota_ratio * profit_ota_acc + (1 - RL_CONFIG.reward_ota_ratio) * total_system_profit_acc
+
+                    state_for_update = dict(decision_state_by_offset[off])
+                    next_state_for_update = dict(env._get_state_for_day_offset(off))
+                    next_state_for_update['stage_id'] = int(bucket_of_offset[off])
+
+                    if train_hotel:
+                        hotel_agent.update(state_for_update, np.array([pob_prev, pof_prev]), reward_hotel_acc, next_state_for_update, done=False, ota_subsidy=subsidy_cost_acc)
+                    if train_ota and training_mode != 'fixed_ota':
+                        ota_agent.update(pob_prev, pof_prev, state_for_update, sr_prev, reward_ota_acc, next_state_for_update, done=False)
+
+                acc_bookings_online_by_offset[off] = 0
+                acc_bookings_offline_by_offset[off] = 0
+
+                sid = int(bucket_of_offset[off])
+                st = dict(env._get_state_for_day_offset(off))
+                st['stage_id'] = sid
+
+                pob, pof = hotel_agent.select_action(st, deterministic=False)
+                if training_mode == 'fixed_ota':
+                    gap = pof - pob
+                    if gap > 20:
+                        sr = 0.2
+                    elif gap > 10:
+                        sr = 0.5
+                    else:
+                        sr = 0.7
+                else:
+                    sr = ota_agent.select_action(pob, pof, st, deterministic=False)
+
+                price_online_base_by_offset[off] = float(pob)
+                price_offline_by_offset[off] = float(pof)
+                subsidy_ratio_by_offset[off] = float(sr)
+                decision_state_by_offset[off] = dict(st)
+
+            price_online_final_window = [
+                price_online_base_by_offset[i] - price_online_base_by_offset[i] * RL_CONFIG.commission_rate * subsidy_ratio_by_offset[i]
+                for i in range(booking_window_days)
+            ]
+            subsidy_amount_window = [
+                price_online_base_by_offset[i] * RL_CONFIG.commission_rate * subsidy_ratio_by_offset[i]
+                for i in range(booking_window_days)
+            ]
+
+            actions_window = [[price_online_final_window[i], price_offline_by_offset[i]] for i in range(booking_window_days)]
+            _, _, done, info = env.step(actions_window)
 
             bookings_by_day_offset = info.get('bookings_by_day_offset', [])
-
-            offset_idx = 0
-            for stage_id, start, state_bucket, price_online_base, price_offline, subsidy_ratio, span in bucket_decisions:
-                if offset_idx >= len(bookings_by_day_offset):
-                    break
-
-                end_idx = min(offset_idx + span, len(bookings_by_day_offset))
-                bookings_online = sum(bookings_by_day_offset[j]['bookings_online'] for j in range(offset_idx, end_idx))
-                bookings_offline = sum(bookings_by_day_offset[j]['bookings_offline'] for j in range(offset_idx, end_idx))
-                offset_idx = end_idx
-
-                if bookings_online == 0 and bookings_offline == 0:
-                    continue
-
-                next_state_bucket = dict(env._get_state_for_day_offset(start))
-                next_state_bucket['stage_id'] = int(stage_id)
-
-                revenue_hotel = hotel_agent.calculate_revenue(bookings_online, bookings_offline, price_online_base, price_offline)
-                profit_ota = ota_agent.calculate_profit(bookings_online, price_online_base, subsidy_ratio)
-                actual_subsidy_amount = bookings_online * price_online_base * RL_CONFIG.commission_rate * subsidy_ratio
-
-                total_system_profit = revenue_hotel + profit_ota
-                reward_hotel = RL_CONFIG.reward_hotel_ratio * revenue_hotel + (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit
-                reward_ota = RL_CONFIG.reward_ota_ratio * profit_ota + (1 - RL_CONFIG.reward_ota_ratio) * total_system_profit
-
-                if train_hotel:
-                    hotel_agent.update(state_bucket, np.array([price_online_base, price_offline]), reward_hotel, next_state_bucket, done, actual_subsidy_amount)
-                if train_ota and training_mode != 'fixed_ota':
-                    ota_agent.update(price_online_base, price_offline, state_bucket, subsidy_ratio, reward_ota, next_state_bucket, done)
 
             revenue_hotel_day = 0.0
             profit_ota_day = 0.0
             actual_subsidy_amount_day = 0.0
 
             max_len = min(len(bookings_by_day_offset), booking_window_days)
-            for i in range(max_len):
-                bo = bookings_by_day_offset[i]['bookings_online']
-                bf = bookings_by_day_offset[i]['bookings_offline']
+            for off in range(max_len):
+                bo = bookings_by_day_offset[off]['bookings_online']
+                bf = bookings_by_day_offset[off]['bookings_offline']
                 if bo == 0 and bf == 0:
                     continue
-                pob = price_online_base_window[i]
-                pof = price_offline_window[i]
-                sr = subsidy_ratio_window[i]
-                revenue_hotel_day += hotel_agent.calculate_revenue(bo, bf, pob, pof)
-                profit_ota_day += ota_agent.calculate_profit(bo, pob, sr)
-                actual_subsidy_amount_day += bo * pob * RL_CONFIG.commission_rate * sr
+
+                pob = float(price_online_base_by_offset[off])
+                pof = float(price_offline_by_offset[off])
+                sr = float(subsidy_ratio_by_offset[off])
+
+                revenue = hotel_agent.calculate_revenue(bo, bf, pob, pof)
+                profit = ota_agent.calculate_profit(bo, pob, sr)
+                subsidy_cost = bo * pob * RL_CONFIG.commission_rate * sr
+
+                revenue_hotel_day += revenue
+                profit_ota_day += profit
+                actual_subsidy_amount_day += subsidy_cost
+                acc_bookings_online_by_offset[off] += int(bo)
+                acc_bookings_offline_by_offset[off] += int(bf)
 
             total_bookings_online_day = info.get('new_bookings_online', 0)
             total_bookings_offline_day = info.get('new_bookings_offline', 0)
@@ -249,19 +285,16 @@ def train_game_system(historical_data: pd.DataFrame,
             total_bookings_offline += total_bookings_offline_day
             total_subsidy += actual_subsidy_amount_day
 
-            last_subsidy_ratio = subsidy_ratio_window[0] if subsidy_ratio_window else 0.0
+            last_subsidy_ratio = subsidy_ratio_by_offset[0] if subsidy_ratio_by_offset else 0.0
 
             if is_last_episode:
-                # 记录价格数据
-                writer.add_scalar('LastEpisode/Price_Online_Base', price_online_base_window[0], day)
+                writer.add_scalar('LastEpisode/Price_Online_Base', price_online_base_by_offset[0], day)
                 writer.add_scalar('LastEpisode/Price_Online_Final', price_online_final_window[0], day)
-                writer.add_scalar('LastEpisode/Price_Offline', price_offline_window[0], day)
-                writer.add_scalar('LastEpisode/Subsidy_Ratio', last_subsidy_ratio * 100, day)
+                writer.add_scalar('LastEpisode/Price_Offline', price_offline_by_offset[0], day)
+                writer.add_scalar('LastEpisode/Subsidy_Ratio', float(last_subsidy_ratio) * 100, day)
                 writer.add_scalar('LastEpisode/Subsidy_Amount', subsidy_amount_window[0], day)
-                # 记录预订数据
                 writer.add_scalar('LastEpisode/Bookings_Online', total_bookings_online_day, day)
                 writer.add_scalar('LastEpisode/Bookings_Offline', total_bookings_offline_day, day)
-                # 记录收益数据
                 writer.add_scalar('LastEpisode/Revenue_Hotel', revenue_hotel_day, day)
                 writer.add_scalar('LastEpisode/Profit_OTA', profit_ota_day, day)
 
@@ -271,10 +304,44 @@ def train_game_system(historical_data: pd.DataFrame,
                 if train_ota and training_mode != 'fixed_ota':
                     ota_agent.end_episode()
 
-            state = next_state
             if done:
                 break
+
+            price_online_base_by_offset = price_online_base_by_offset[1:] + [price_online_base_by_offset[-1]]
+            price_offline_by_offset = price_offline_by_offset[1:] + [price_offline_by_offset[-1]]
+            subsidy_ratio_by_offset = subsidy_ratio_by_offset[1:] + [subsidy_ratio_by_offset[-1]]
+            decision_state_by_offset = decision_state_by_offset[1:] + [decision_state_by_offset[-1]]
+            acc_bookings_online_by_offset = acc_bookings_online_by_offset[1:] + [acc_bookings_online_by_offset[-1]]
+            acc_bookings_offline_by_offset = acc_bookings_offline_by_offset[1:] + [acc_bookings_offline_by_offset[-1]]
         
+        for off in range(booking_window_days):
+            bo_acc = int(acc_bookings_online_by_offset[off])
+            bf_acc = int(acc_bookings_offline_by_offset[off])
+            if (bo_acc <= 0 and bf_acc <= 0) or decision_state_by_offset[off] is None:
+                continue
+
+            pob_prev = float(price_online_base_by_offset[off])
+            pof_prev = float(price_offline_by_offset[off])
+            sr_prev = float(subsidy_ratio_by_offset[off])
+
+            revenue_hotel_acc = bo_acc * pob_prev * (1 - RL_CONFIG.commission_rate) + bf_acc * pof_prev
+            commission_revenue_acc = bo_acc * pob_prev * RL_CONFIG.commission_rate
+            subsidy_cost_acc = commission_revenue_acc * sr_prev
+            profit_ota_acc = commission_revenue_acc - subsidy_cost_acc
+
+            total_system_profit_acc = revenue_hotel_acc + profit_ota_acc
+            reward_hotel_acc = RL_CONFIG.reward_hotel_ratio * revenue_hotel_acc + (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit_acc
+            reward_ota_acc = RL_CONFIG.reward_ota_ratio * profit_ota_acc + (1 - RL_CONFIG.reward_ota_ratio) * total_system_profit_acc
+
+            state_for_update = dict(decision_state_by_offset[off])
+            next_state_for_update = dict(env._get_state_for_day_offset(off))
+            next_state_for_update['stage_id'] = int(bucket_of_offset[off])
+
+            if train_hotel:
+                hotel_agent.update(state_for_update, np.array([pob_prev, pof_prev]), reward_hotel_acc, next_state_for_update, done=True, ota_subsidy=subsidy_cost_acc)
+            if train_ota and training_mode != 'fixed_ota':
+                ota_agent.update(pob_prev, pof_prev, state_for_update, sr_prev, reward_ota_acc, next_state_for_update, done=True)
+
         if update_frequency <= 0 or 365 % update_frequency != 0:
             if train_hotel:
                 hotel_agent.end_episode()
