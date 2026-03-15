@@ -124,8 +124,9 @@ def train_game_system(historical_data: pd.DataFrame,
     
     # 初始化TensorBoard
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_id = f"{timestamp}_{os.getpid()}"
     algorithm_suffix = "cem_nn" if RL_CONFIG.cem_algorithm == 'cem_nn' else "cem"
-    log_dir = os.path.join(PATH_CONFIG.tensorboard_dir, f'game_{algorithm_suffix}_{timestamp}')
+    log_dir = os.path.join(PATH_CONFIG.tensorboard_dir, f'game_{algorithm_suffix}_cap{ENV_CONFIG.initial_inventory}_{run_id}')
     writer = SummaryWriter(log_dir=log_dir)
     
     print("\n开始训练...")
@@ -519,4 +520,4 @@ def plot_game_results(episode_rewards_hotel: List[float],
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"\n博弈结果图已保存到: {save_path}")
     
-    plt.show()
+    #plt.show()
