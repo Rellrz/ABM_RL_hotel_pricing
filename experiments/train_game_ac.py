@@ -10,6 +10,7 @@ import sys
 from datetime import datetime
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import traceback
+import glob
 
 # 添加项目根目录到路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,12 +49,25 @@ def _run_one_capacity(capacity: int, args_dict: dict) -> dict:
 
         run_id = f"cap{capacity}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{os.getpid()}"
 
+        model_paths = {}
         if hasattr(hotel_agent, 'cem_online') and hasattr(hotel_agent.cem_online, 'save_model'):
-            hotel_agent.cem_online.save_model(f'hotel_online_{run_id}')
+            prefix = f'hotel_online_{run_id}'
+            hotel_agent.cem_online.save_model(prefix)
+            candidates = glob.glob(os.path.join(PATH_CONFIG.models_dir, f'{prefix}_agent_*.json'))
+            if candidates:
+                model_paths['hotel_online'] = max(candidates, key=os.path.getmtime)
         if hasattr(hotel_agent, 'cem_offline') and hasattr(hotel_agent.cem_offline, 'save_model'):
-            hotel_agent.cem_offline.save_model(f'hotel_offline_{run_id}')
+            prefix = f'hotel_offline_{run_id}'
+            hotel_agent.cem_offline.save_model(prefix)
+            candidates = glob.glob(os.path.join(PATH_CONFIG.models_dir, f'{prefix}_agent_*.json'))
+            if candidates:
+                model_paths['hotel_offline'] = max(candidates, key=os.path.getmtime)
         if hasattr(ota_agent, 'cem') and hasattr(ota_agent.cem, 'save_model'):
-            ota_agent.cem.save_model(f'ota_{run_id}')
+            prefix = f'ota_{run_id}'
+            ota_agent.cem.save_model(prefix)
+            candidates = glob.glob(os.path.join(PATH_CONFIG.models_dir, f'{prefix}_agent_*.json'))
+            if candidates:
+                model_paths['ota'] = max(candidates, key=os.path.getmtime)
 
         figure_dir = os.path.join(PROJECT_ROOT, 'outputs', 'figures')
         os.makedirs(figure_dir, exist_ok=True)
@@ -68,6 +82,7 @@ def _run_one_capacity(capacity: int, args_dict: dict) -> dict:
             'capacity': capacity,
             'data_path': data_path,
             'figure_path': figure_path,
+            'model_paths': model_paths,
             'status': 'ok',
         }
     except Exception as e:
@@ -84,7 +99,7 @@ def main():
     parser = argparse.ArgumentParser(description='训练酒店-OTA博弈系统')
     parser.add_argument('--data', type=str, default='datasets/hotel_bookings.csv',
                        help='酒店预订数据文件路径')
-    parser.add_argument('--episodes', type=int, default=150, help='训练轮数')
+    parser.add_argument('--episodes', type=int, default=250, help='训练轮数')
     parser.add_argument('--mode', type=str, default='simultaneous', 
                        choices=['fixed_ota', 'alternating', 'simultaneous'],
                        help='训练模式')
@@ -112,6 +127,7 @@ def main():
     hotel_capacity = [50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200]
     results = {}
     results_fig = {}
+    results_models = {}
 
     args_dict = {
         'data': args.data,
@@ -131,6 +147,7 @@ def main():
                 print(f"[OK] capacity={capacity} csv={result['data_path']} fig={result['figure_path']}")
                 results[capacity] = result['data_path']
                 results_fig[capacity] = result['figure_path']
+                results_models[capacity] = result.get('model_paths', {})
             else:
                 print(f"[ERROR] capacity={capacity} error={result['error']}")
                 print(result['traceback'])
@@ -145,6 +162,7 @@ def main():
                     print(f"[OK] capacity={capacity} csv={result['data_path']} fig={result['figure_path']}")
                     results[capacity] = result['data_path']
                     results_fig[capacity] = result['figure_path']
+                    results_models[capacity] = result.get('model_paths', {})
                 else:
                     print(f"[ERROR] capacity={capacity} error={result.get('error')}")
                     print(result.get('traceback', ''))
@@ -154,13 +172,17 @@ def main():
     results_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
     results_path = os.path.join(results_dir, f'capacity_to_csv_{results_timestamp}.json')
     figures_path = os.path.join(results_dir, f'capacity_to_figure_{results_timestamp}.json')
+    models_path = os.path.join(results_dir, f'capacity_to_model_{results_timestamp}.json')
     import json
     with open(results_path, 'w', encoding='utf-8') as f:
         json.dump({str(k): v for k, v in results.items()}, f, ensure_ascii=False, indent=2)
     with open(figures_path, 'w', encoding='utf-8') as f:
         json.dump({str(k): v for k, v in results_fig.items()}, f, ensure_ascii=False, indent=2)
+    with open(models_path, 'w', encoding='utf-8') as f:
+        json.dump({str(k): v for k, v in results_models.items()}, f, ensure_ascii=False, indent=2)
     print(f"\n[Summary] capacity→csv 已保存: {results_path}")
     print(f"[Summary] capacity→figure 已保存: {figures_path}")
+    print(f"[Summary] capacity→model 已保存: {models_path}")
     print(f"[Summary] capacity→csv: {results}")
 
     
