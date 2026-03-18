@@ -3,7 +3,7 @@
 本仓库实现了一个基于 **ABM（消费者行为仿真） + 多智能体博弈（酒店 vs OTA） + CEM（Cross-Entropy Method）** 的动态定价系统，用于研究不同酒店容量、渠道结构与补贴策略下的价格策略与收益表现。
 
 设计文档（与代码同步更新）：[基于ABM-MARL的酒店-OTA动态定价博弈系统设计文档.md](docs/%E5%9F%BA%E4%BA%8EABM-MARL%E7%9A%84%E9%85%92%E5%BA%97-OTA%E5%8A%A8%E6%80%81%E5%AE%9A%E4%BB%B7%E5%8D%9A%E5%BC%88%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1%E6%96%87%E6%A1%A3.md)
-[基于ABM-MARL的酒店-OTA动态定价博弈系统设计文档.md](docs/基于ABM-MARL的酒店-OTA动态定价博弈系统设计文档.pdf)
+[基于ABM-MARL的酒店-OTA动态定价博弈系统设计文档.pdf](docs/基于ABM-MARL的酒店-OTA动态定价博弈系统设计文档.pdf)
 
 
 ### 查看训练后的模型参数
