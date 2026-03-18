@@ -466,7 +466,9 @@ Day t+1:  [t+1, t+2, t+3, ..., t+91]  ← 窗口滚动
 
 ### 6.3 决策桶（Decision Buckets）机制
 
-91天的预订窗口被划分为多个决策桶，每个桶内的所有日期偏移使用相同的定价策略。
+91天的预订窗口被划分为多个决策桶（阶段），桶的主要作用是**定义“调价决策的阶段边界”**，而不是强制“桶内所有偏移永远使用同一个价格”。
+
+在当前实现中，系统对每个入住日轨道（`day_offset`）单独维护挂牌价；当该轨道的 `day_offset` 进入某个桶的边界触发点（默认使用桶的右端点 `bucket_end`）时，才进行一次阶段切换调价。桶的粒度越细（越临近入住日），调价越频繁；桶越粗（远期），调价越稀疏。
 
 默认分桶配置：`"0|1|2-3|4-6|7-13|14-29|30-59|60-90"`
 
@@ -503,55 +505,49 @@ Day t+1:  [t+1, t+2, t+3, ..., t+91]  ← 窗口滚动
 
 以一天（Day $t$）的交互为例：
 
-**Step 1: 决策制定阶段（按桶分组）**
+**Step 1: 触发更新（按入住日轨道，在桶边界更新挂牌价）**
 
-对每个决策桶 $(s_k, e_k)$，$k = 0, 1, \ldots, K-1$：
+系统对窗口内每个入住日轨道（`day_offset`）维护独立的挂牌价与补贴率：
+- `P_online_base[off]`：酒店线上基础价（给OTA计佣金的基础）
+- `P_offline[off]`：酒店线下价
+- `r_subsidy[off]`：OTA补贴比例
 
-1. 获取该桶代表日期偏移的环境状态：
+窗口 `0..90` 被 `decision_buckets` 切分为 K 个阶段（桶索引为 `stage_id`）。系统只在每个桶的右端点（`bucket_end`）触发该入住日轨道的“阶段切换调价”：
+
+1. 对每个触发偏移 `off ∈ {bucket_end}`：
+   - 先对该轨道上一阶段累计预订量做阶段结算（见 Step 3），并用结算奖励更新上一阶段决策
+   - 再读取状态并做新阶段决策：
+     ```python
+     state = env._get_state_for_day_offset(off)
+     state["stage_id"] = bucket_of_offset[off]  # 桶索引
+     P_online_base[off], P_offline[off] = hotel_agent.select_action(state)
+     r_subsidy[off] = ota_agent.select_action(P_online_base[off], P_offline[off], state)
+     ```
+
+**Step 2: 环境模拟阶段（整窗口执行）**
+
+用当前所有轨道的挂牌价构造完整的91天价格窗口，并执行环境一步：
+
+1. 最终线上价：
+   $$P_{\text{online,final}}[off] = P_{\text{online,base}}[off] - P_{\text{online,base}}[off]\cdot c \cdot r_{\text{subsidy}}[off]$$
+
+2. 传入环境：
    ```python
-   state = env._get_state_for_day_offset(ref_offset)
-   state['stage_id'] = k  # 附加阶段标识
+   actions_window = [[P_online_final[i], P_offline[i]] for i in range(91)]
+   _, _, done, info = env.step(actions_window)
    ```
-
-2. 酒店Agent选择价格：
-   ```python
-   price_online_base, price_offline = hotel_agent.select_action(state)
-   ```
-
-3. OTA Agent选择补贴：
-   ```python
-   subsidy_ratio = ota_agent.select_action(price_online_base, price_offline, state)
-   ```
-
-4. 计算最终线上价格：
-   ```python
-   price_online_final = price_online_base - price_online_base * commission_rate * subsidy_ratio
-   ```
-
-5. 将价格填充到桶内的所有日期偏移位置
-
-**Step 2: 环境模拟阶段**
-
-将完整的91天价格窗口传入环境：
-```python
-actions_window = [[price_online_final[i], price_offline[i]] for i in range(91)]
-next_state, revenue, done, info = env.step(actions_window)
-```
 
 环境内部：
-1. 将价格窗口同步到ABM模型
-2. 将库存状态同步到ABM模型
-3. ABM执行当日模拟（消费者生成→决策→预订）
-4. 返回按 `day_offset` 分组的预订统计
+1. 将价格窗口同步到 ABM（按 `days_ahead` 取价）
+2. 将未来库存同步到 ABM（按入住日 `target_date` 扣减）
+3. ABM 执行当日模拟（消费者生成→决策→预订→库存扣减）
+4. 返回 `bookings_by_day_offset`（按入住日轨道/提前期统计的预订量与收入）
 
-**Step 3: 奖励计算与Agent更新**
+**Step 3: 奖励计算与阶段结算更新（credit assignment）**
 
-1. 从 `info['bookings_by_day_offset']` 中提取各偏移位置的预订量
-2. 按偏移位置累计预订量
-3. 在决策桶的触发日到达时：
-   - 计算该桶累计的酒店收益和OTA利润
-   - 构建奖励信号
-   - 更新对应Agent的CEM参数
+1. 从 `info['bookings_by_day_offset']` 读取每个 `off` 的预订量 `B_online[off]`、`B_offline[off]`
+2. 将其累加到该轨道的“阶段累计预订量”中（用于下一次触发点结算）
+3. 当 `off` 命中触发点时，使用该轨道上一阶段累计预订量计算酒店收益与OTA利润，并用混合奖励更新对应 Agent 的 CEM 参数（上一阶段的 `state/action`）
 ---
 
 ## 7. 奖励函数设计

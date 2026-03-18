@@ -1,5 +1,9 @@
 # 酒店-OTA博弈系统
 
+本仓库实现了一个基于 **ABM（消费者行为仿真） + 多智能体博弈（酒店 vs OTA） + CEM（Cross-Entropy Method）** 的动态定价系统，用于研究不同酒店容量、渠道结构与补贴策略下的价格策略与收益表现。
+
+设计文档（与代码同步更新）：[基于ABM-MARL的酒店-OTA动态定价博弈系统设计文档.md](file:///Users/raily/Desktop/hotel_pricing/ABM_MARL_hotel_pricing/docs/%E5%9F%BA%E4%BA%8EABM-MARL%E7%9A%84%E9%85%92%E5%BA%97-OTA%E5%8A%A8%E6%80%81%E5%AE%9A%E4%BB%B7%E5%8D%9A%E5%BC%88%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1%E6%96%87%E6%A1%A3.md)
+
 ## 状态空间编码对照表
 
 ### 酒店Agent状态编码（18种状态）
@@ -8,40 +12,44 @@
 
 | 状态序号 | 库存水平 | 季节 | 日期类型 | 说明 |
 |---------|---------|------|---------|------|
-| 0 | 低库存 (≤33间) | 淡季 | 工作日 | 低库存+淡季+工作日 |
-| 1 | 低库存 (≤33间) | 淡季 | 周末 | 低库存+淡季+周末 |
-| 2 | 低库存 (≤33间) | 平季 | 工作日 | 低库存+平季+工作日 |
-| 3 | 低库存 (≤33间) | 平季 | 周末 | 低库存+平季+周末 |
-| 4 | 低库存 (≤33间) | 旺季 | 工作日 | 低库存+旺季+工作日 |
-| 5 | 低库存 (≤33间) | 旺季 | 周末 | 低库存+旺季+周末 |
-| 6 | 中库存 (34-66间) | 淡季 | 工作日 | 中库存+淡季+工作日 |
-| 7 | 中库存 (34-66间) | 淡季 | 周末 | 中库存+淡季+周末 |
-| 8 | 中库存 (34-66间) | 平季 | 工作日 | 中库存+平季+工作日 |
-| 9 | 中库存 (34-66间) | 平季 | 周末 | 中库存+平季+周末 |
-| 10 | 中库存 (34-66间) | 旺季 | 工作日 | 中库存+旺季+工作日 |
-| 11 | 中库存 (34-66间) | 旺季 | 周末 | 中库存+旺季+周末 |
-| 12 | 高库存 (≥67间) | 淡季 | 工作日 | 高库存+淡季+工作日 |
-| 13 | 高库存 (≥67间) | 淡季 | 周末 | 高库存+淡季+周末 |
-| 14 | 高库存 (≥67间) | 平季 | 工作日 | 高库存+平季+工作日 |
-| 15 | 高库存 (≥67间) | 平季 | 周末 | 高库存+平季+周末 |
-| 16 | 高库存 (≥67间) | 旺季 | 工作日 | 高库存+旺季+工作日 |
-| 17 | 高库存 (≥67间) | 旺季 | 周末 | 高库存+旺季+周末 |
+| 0 | 低库存 (≤⌊C/3⌋) | 淡季 | 工作日 | 低库存+淡季+工作日 |
+| 1 | 低库存 (≤⌊C/3⌋) | 淡季 | 周末 | 低库存+淡季+周末 |
+| 2 | 低库存 (≤⌊C/3⌋) | 平季 | 工作日 | 低库存+平季+工作日 |
+| 3 | 低库存 (≤⌊C/3⌋) | 平季 | 周末 | 低库存+平季+周末 |
+| 4 | 低库存 (≤⌊C/3⌋) | 旺季 | 工作日 | 低库存+旺季+工作日 |
+| 5 | 低库存 (≤⌊C/3⌋) | 旺季 | 周末 | 低库存+旺季+周末 |
+| 6 | 中库存 (⌊C/3⌋-⌊2C/3⌋) | 淡季 | 工作日 | 中库存+淡季+工作日 |
+| 7 | 中库存 (⌊C/3⌋-⌊2C/3⌋) | 淡季 | 周末 | 中库存+淡季+周末 |
+| 8 | 中库存 (⌊C/3⌋-⌊2C/3⌋) | 平季 | 工作日 | 中库存+平季+工作日 |
+| 9 | 中库存 (⌊C/3⌋-⌊2C/3⌋) | 平季 | 周末 | 中库存+平季+周末 |
+| 10 | 中库存 (⌊C/3⌋-⌊2C/3⌋) | 旺季 | 工作日 | 中库存+旺季+工作日 |
+| 11 | 中库存 (⌊C/3⌋-⌊2C/3⌋) | 旺季 | 周末 | 中库存+旺季+周末 |
+| 12 | 高库存 (>⌊2C/3⌋) | 淡季 | 工作日 | 高库存+淡季+工作日 |
+| 13 | 高库存 (>⌊2C/3⌋) | 淡季 | 周末 | 高库存+淡季+周末 |
+| 14 | 高库存 (>⌊2C/3⌋) | 平季 | 工作日 | 高库存+平季+工作日 |
+| 15 | 高库存 (>⌊2C/3⌋) | 平季 | 周末 | 高库存+平季+周末 |
+| 16 | 高库存 (>⌊2C/3⌋) | 旺季 | 工作日 | 高库存+旺季+工作日 |
+| 17 | 高库存 (>⌊2C/3⌋) | 旺季 | 周末 | 高库存+旺季+周末 |
 
 ### 状态维度说明
 
 **库存水平（inventory_level）**：
-- 0: 低库存 - 剩余房间 ≤33间 (≤33%)
-- 1: 中库存 - 剩余房间 34-66间 (34%-66%)
-- 2: 高库存 - 剩余房间 ≥67间 (≥67%)
+- 0: 低库存 - 剩余房间 ≤ ⌊C/3⌋（C为酒店容量）
+- 1: 中库存 - ⌊C/3⌋ < 剩余房间 ≤ ⌊2C/3⌋
+- 2: 高库存 - 剩余房间 > ⌊2C/3⌋
 
 **季节（season）**：
-- 0: 淡季 - 1-3月, 7-8月
-- 1: 平季 - 4-6月, 11-12月
-- 2: 旺季 - 9-10月
+- 0: 淡季 - 11月、12月、1月、2月
+- 1: 平季 - 3月-5月、9月-10月
+- 2: 旺季 - 6月、7月、8月
 
 **日期类型（weekday）**：
-- 0: 工作日 - 周一至周四
-- 1: 周末 - 周五至周日
+- 0: 工作日
+- 1: 周末（假设 Day0 是周一，day % 7 ∈ {5, 6} 时为周六/周日）
+
+**阶段（stage_id）**：
+- 在 0..90 的预订窗口上按 `decision_buckets` 切分为 K 个连续区间，每个区间对应一个 `stage_id`（桶索引）。
+- 扩展状态编码：`state_idx_extended = base_state_idx × K + stage_id`，酒店Agent总状态空间为 `18 × K`，OTA Agent 为 `90 × K`。
 
 ### 查看训练后的模型参数
 
@@ -69,6 +77,10 @@ JSON 文件中的状态序号对应上表中的状态编码，例如：
 }
 ```
 
+说明：
+- CEM 表格版模型文件中会保存均值/标准差/访问次数表（key 为状态索引的字符串）。
+- OTA 的模型文件也使用相同的保存接口，字段名可能沿用历史命名（例如仍出现 `cem_online_means`），以文件实际键为准。
+
 ## TensorBoard 可视化
 
 ```bash
@@ -79,14 +91,15 @@ tensorboard --logdir=outputs/tensorboard_logs
 - 酒店和OTA的收益曲线
 - 线上/线下预订量对比
 - 补贴策略变化
-- 最后一个episode的每日价格和补贴曲线
+- 最后一个episode的逐日价格与补贴曲线（day0为“今天”）
 
-## 模拟流程（多智能体：酒店 vs OTA，修改后版本）
+## 模拟流程（多智能体：酒店 vs OTA，当前代码版本）
 
-本节描述你确认并应用以下修改后的“训练 + 仿真”主流程：
-- 提前期：消费者 lead_time ∈ [0,90]，并严格按数据集（City Hotel，截断到0-90）经验分布采样
-- 预订窗口：booking_window_days = 91（覆盖 day_offset=0..90）
-- 决策方式：不再对 91 天逐日独立决策，而是用“提前期分桶”降低动作维度（每个桶输出一组价格/补贴，然后展开成 91 天窗口）
+本节描述当前“训练 + 仿真”主流程要点：
+- 提前期：消费者 `lead_time ∈ [0, 90]`，优先按数据集（City Hotel，截断到0-90）经验分布采样（否则用指数分布兜底）
+- 预订窗口：`booking_window_days = 91`（覆盖 `day_offset=0..90`），环境维护未来91天库存与报价窗口
+- 定价维护方式：对每个“入住日轨道”（窗口内每个 `day_offset`）维护独立挂牌价；只在 `decision_buckets` 的边界触发日更新（其余天保持不变）
+- 学习更新方式：一次“调价决策”对应一个阶段跨度的累计效果，奖励在触发边界时做阶段结算并更新（避免碎片化更新导致噪声）
 
 涉及模块：
 - 入口脚本：experiments/train_game.py
@@ -98,10 +111,10 @@ tensorboard --logdir=outputs/tensorboard_logs
 ### 1) 数据与初始化
 
 1. train_game.py 读取 datasets/hotel_bookings.csv 并筛选 City Hotel。
-2. 构造 ABM 的 lead_time 经验分布：统计 City Hotel 的 lead_time（仅保留 0..90），归一化为概率向量，用于采样。
+2. 构造 ABM 的 lead_time 经验分布（若提供数据路径）：统计 City Hotel 的 lead_time（仅保留 0..90），归一化为概率向量。
 3. 创建 HotelEnvironment(booking_window_days=91)：
-   - future_inventory：长度 91，表示今天及未来 90 天的可售库存
-   - current_price_window_online/offline：长度 91，表示每个提前期对应的报价
+   - future_inventory：长度 91，表示今天及未来 90 天的可售库存（按入住日独立扣减）
+   - current_price_window_online/offline：长度 91，表示每个提前期/入住日轨道的报价
 4. 创建 Agent：
    - HotelAgentDualChannel：输出 [price_online_base, price_offline]
    - OTAAgent：输出 subsidy_ratio（补贴比例）
@@ -109,24 +122,22 @@ tensorboard --logdir=outputs/tensorboard_logs
 ### 2) Episode 时间结构
 
 - 训练按 episode 循环；每个 episode 运行 365 个仿真日。
-- 每个仿真日 t 的动作不再是 5 天窗口，而是“91 天价格窗口”（通过分桶展开得到）。
+- 每个仿真日会向环境传入完整的 91 天价格窗口；但窗口内的大部分入住日价格是“沿用历史挂牌价”，只有触发点上的入住日会在当天更新。
 
-### 3) 每个仿真日的分桶决策与执行（核心）
+### 3) 每个仿真日的“触发更新 + 执行”流程（核心）
 
 对某一仿真日 t：
 
-1. 分桶（bucket）：把 0..90 的提前期划分成若干连续区间（默认示例：0 | 1 | 2-3 | 4-6 | 7-13 | 14-29 | 30-59 | 60-90）。
-2. 对每个 bucket 只决策一次：
-   - 取该桶起点 day_offset=start 的状态：env._get_state_for_day_offset(start)
-   - 酒店输出该桶的 [price_online_base, price_offline]
-   - OTA 输出该桶的 subsidy_ratio（fixed_ota 模式则按规则生成）
-3. 把 bucket 决策展开成 91 天窗口：
-   - price_online_base_window[0..90]、price_offline_window[0..90]、subsidy_ratio_window[0..90]
-4. 计算最终线上价（逐 day_offset）：
-   - price_online_final[d] = price_online_base_window[d] - price_online_base_window[d] * commission_rate * subsidy_ratio_window[d]
-5. 环境执行一步：
-   - actions_window = [[price_online_final[d], price_offline_window[d]] for d in 0..90]
-   - env.step(actions_window) 同步 91 天价格与 91 天库存到 ABM，并模拟“当天新增客户的预订”。
+1. 解析分桶：把 0..90 的提前期划分成若干连续区间（示例：0 | 1 | 2-3 | 4-6 | 7-13 | 14-29 | 30-59 | 60-90），桶索引为 `stage_id`。
+2. 触发更新（只在桶边界）：对每个 `off in {bucket_end}`：
+   - 先对该入住日轨道上一阶段累计预订做结算并更新策略
+   - 再读取该入住日状态 `env._get_state_for_day_offset(off)`（附带 `stage_id`）并生成新挂牌价（酒店）与新补贴率（OTA）
+3. 构造 91 天价格窗口：
+   - 每个 `day_offset` 使用其当前挂牌价（若当天未触发更新则沿用）
+   - 计算最终线上价：`price_online_final = price_online_base - price_online_base * commission_rate * subsidy_ratio`
+4. 环境执行 `env.step(actions_window)`：
+   - ABM 当天生成客户，按客户的 `lead_time` 选择对应 `day_offset` 的价格进行预订决策
+   - 成交后按入住日库存扣减，并返回 `bookings_by_day_offset`
 
 ### 4) ABM 在 env.step() 内做了什么（修改后）
 
@@ -140,18 +151,12 @@ ABM（abm_customer_model.py）在 simulate_day() 中：
 4. 库存扣减：按 target_date（入住日）检查并扣减 daily_available_rooms[target_date]。
 5. 统计：输出 bookings_by_day_offset（长度 91，每个 day_offset 的线上/线下预订量与收入）。
 
-### 5) 训练更新（按 bucket 聚合更新）
+### 5) 训练更新（按入住日轨道、在桶边界阶段结算）
 
-env.step() 返回 info['bookings_by_day_offset']（0..90）。训练器按 bucket 聚合预订量，再做一次更新：
-- 对每个 bucket，把该桶覆盖的 day_offset 区间内 bookings_online/bookings_offline 求和。
-- 计算该 bucket 的：
-  - 酒店收益：hotel_agent.calculate_revenue(Σbookings_online, Σbookings_offline, price_online_base_bucket, price_offline_bucket)
-  - OTA 利润：ota_agent.calculate_profit(Σbookings_online, price_online_base_bucket, subsidy_ratio_bucket)
-  - 实际补贴金额：Σbookings_online * price_online_base_bucket * commission_rate * subsidy_ratio_bucket
-- 用混合奖励（reward_hotel_ratio/reward_ota_ratio）生成 reward_hotel/reward_ota
-- 调用 update：
-  - hotel_agent.update(state_for_bucket, [price_online_base_bucket, price_offline_bucket], reward_hotel, next_state, done, actual_subsidy_amount)
-  - ota_agent.update(price_online_base_bucket, price_offline_bucket, state_for_bucket, subsidy_ratio_bucket, reward_ota, next_state, done)
+env.step() 返回 info['bookings_by_day_offset']（0..90）。训练器将其累加到每个入住日轨道的“阶段累计预订量”，并在桶边界触发点：
+- 计算该轨道上一阶段累计带来的酒店收益与OTA利润
+- 用混合奖励（reward_hotel_ratio/reward_ota_ratio）构造 reward_hotel/reward_ota
+- 将 reward 归因到“该轨道上一阶段的挂牌价决策状态”并更新 CEM
 
 ### 6) 日度统计与日志（修改后）
 
@@ -170,3 +175,16 @@ python experiments/train_game.py \
   --booking-window-days 91 \
   --decision-buckets "0|1|2-3|4-6|7-13|14-29|30-59|60-90"
 ```
+
+### 8) 容量并行实验（capacity sweep）
+
+使用 [train_game_ac.py](file:///Users/raily/Desktop/hotel_pricing/ABM_MARL_hotel_pricing/experiments/train_game_ac.py) 可对不同酒店容量并行训练，并输出映射 JSON 便于后处理：
+
+```bash
+python experiments/train_game_ac.py --episodes 250 --workers 4
+```
+
+训练结束会输出：
+- `outputs/results/capacity_to_csv_*.json`：capacity → 训练CSV路径
+- `outputs/results/capacity_to_figure_*.json`：capacity → 结果图路径
+- `outputs/results/capacity_to_model_*.json`：capacity → 模型文件路径（线上/线下/OTA）
