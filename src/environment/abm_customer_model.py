@@ -352,8 +352,32 @@ class HotelABMModel(Model):
         target_date = current_day + lead_time
         
         # 3. 最高支付意愿 WTP_i ~ Normal(μ_adr, σ_adr)
-        wtp_mean = self.params.wtp_params['mean']
-        wtp_std = self.params.wtp_params['std']
+        wtp_params = self.params.wtp_params
+
+        wtp_mean = float(wtp_params.get('mean', 100.0))
+        wtp_std = float(wtp_params.get('std', 30.0))
+
+        by_season_weekday = wtp_params.get('by_season_weekday')
+        if isinstance(by_season_weekday, dict):
+            month = (current_day // 30) % 12 + 1
+            if month in [11, 12, 1, 2]:
+                season = 0
+            elif month in [6, 7, 8]:
+                season = 2
+            else:
+                season = 1
+
+            is_weekend = 1 if (current_day % 7) in [5, 6] else 0
+
+            seg = by_season_weekday.get(season) if isinstance(by_season_weekday, dict) else None
+            if isinstance(seg, dict):
+                stats = seg.get(is_weekend)
+                if isinstance(stats, dict):
+                    wtp_mean = float(stats.get('mean', wtp_mean))
+                    wtp_std = float(stats.get('std', wtp_std))
+
+        if wtp_std <= 0:
+            wtp_std = 30.0
         wtp = np.random.normal(wtp_mean, wtp_std)
         wtp = max(10.0, wtp)  # 确保不低于最低价
         

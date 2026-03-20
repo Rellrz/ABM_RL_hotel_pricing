@@ -114,8 +114,7 @@ def build_empirical_lead_time_distribution(
         'probabilities': probabilities,
     }
 
-
-def fit_wtp_distribution(historical_data: pd.DataFrame) -> Dict[str, float]:
+def fit_wtp_distribution(historical_data: pd.DataFrame) -> Dict[str, Any]:
     """
     拟合支付意愿分布（正态分布）
     
@@ -126,21 +125,76 @@ def fit_wtp_distribution(historical_data: pd.DataFrame) -> Dict[str, float]:
         
     Returns:
         分布参数字典
-    """
-    if 'adr' not in historical_data.columns:
-        return {'mean': 100.0, 'std': 30.0}
-    
+    """    
     df = historical_data.copy()
     if 'is_canceled' in df.columns:
         df = df[df['is_canceled'] == 0]
-    
+
     adr_values = df['adr'].dropna()
     adr_values = adr_values[(adr_values > 0) & (adr_values < 500)]
-    
-    if len(adr_values) == 0:
-        return {'mean': 100.0, 'std': 30.0}
-    
-    return {'mean': float(adr_values.mean()), 'std': float(adr_values.std())}
+
+
+    overall_mean = float(adr_values.mean())
+    overall_std = float(adr_values.std()) if float(adr_values.std()) > 0 else 30.0
+
+    month_map = {
+        'January': 1, 'February': 2, 'March': 3, 'April': 4,
+        'May': 5, 'June': 6, 'July': 7, 'August': 8,
+        'September': 9, 'October': 10, 'November': 11, 'December': 12
+    }
+
+    if 'arrival_date_year' in df.columns and 'arrival_date_month' in df.columns and 'arrival_date_day_of_month' in df.columns:
+        df = df.copy()
+        df['month_num'] = df['arrival_date_month'].map(month_map)
+        df['date'] = pd.to_datetime(
+            dict(
+                year=df['arrival_date_year'],
+                month=df['month_num'],
+                day=df['arrival_date_day_of_month'],
+            ),
+            errors='coerce',
+        )
+        df = df[df['date'].notna()].copy()
+
+        df = df[df['adr'].notna()].copy()
+        df = df[(df['adr'] > 0) & (df['adr'] < 500)].copy()
+
+        if len(df) > 0:
+            df['is_weekend'] = (df['date'].dt.dayofweek >= 5).astype(int)
+            df['season'] = df['month_num'].map(lambda m: 0 if m in [11, 12, 1, 2] else (2 if m in [6, 7, 8] else 1)).astype(int)
+
+            by_season_weekday: Dict[int, Dict[int, Dict[str, float]]] = {0: {}, 1: {}, 2: {}}
+            grouped = df.groupby(['season', 'is_weekend'])['adr']
+            for (season, is_weekend), series in grouped:
+                series = series.dropna()
+                series = series[(series > 0) & (series < 500)]
+                if len(series) == 0:
+                    continue
+                m = float(series.mean())
+                s = float(series.std()) if float(series.std()) > 0 else overall_std
+                by_season_weekday[int(season)][int(is_weekend)] = {'mean': m, 'std': s}
+
+            for season in [0, 1, 2]:
+                for is_weekend in [0, 1]:
+                    if is_weekend not in by_season_weekday[season]:
+                        by_season_weekday[season][is_weekend] = {'mean': overall_mean, 'std': overall_std}
+
+            return {
+                'type': 'normal',
+                'mean': overall_mean,
+                'std': overall_std,
+                'overall': {'mean': overall_mean, 'std': overall_std},
+                'by_season_weekday': by_season_weekday,
+            }
+
+    fallback = _default_wtp_params()
+    fallback['mean'] = overall_mean
+    fallback['std'] = overall_std
+    fallback['overall'] = {'mean': overall_mean, 'std': overall_std}
+    for season in [0, 1, 2]:
+        for is_weekend in [0, 1]:
+            fallback['by_season_weekday'][season][is_weekend] = {'mean': overall_mean, 'std': overall_std}
+    return fallback
 
 
 def create_abm_config(data_path:str = None) -> 'ABMConfig':
@@ -260,7 +314,7 @@ class RLConfig:
     offline_price_max: float = 180.0  # 线下价格最大值
     game_training_mode: str = 'simultaneous'  # 训练模式：'fixed_ota', 'alternating', 'simultaneous'
     
-    episodes: int = 500  # Actor-Critic需要更多轮次
+    episodes: int = 250  # Actor-Critic需要更多轮次
     online_learning_days: int = 90
     update_frequency: int = 7
     
@@ -279,8 +333,8 @@ class RLConfig:
 class EnvConfig:
     """酒店环境参数，模拟真实的酒店运营环境"""
     
-    initial_inventory: int = 200
-    max_inventory: int = 200
+    initial_inventory: int = 70
+    max_inventory: int = 70
     min_inventory: int = 0
 
     booking_window_days: int = 91
