@@ -130,8 +130,11 @@ def train_game_system(historical_data: pd.DataFrame,
     writer = SummaryWriter(log_dir=log_dir)
     
     print("\n开始训练...")
-    algorithm_name = "CEM-NN (神经网络)" if RL_CONFIG.cem_algorithm == 'cem_nn' else "CEM (表格版)"
-    print(f"✅ 酒店Agent: 双{algorithm_name}（线上基础价格 + 线下价格）")
+    algorithm_name = "CEM-NN (神经网络)" if RL_CONFIG.cem_algorithm == 'cem_nn' else "CEM (多元高斯版)"
+    if RL_CONFIG.cem_algorithm == 'cem_nn':
+        print(f"✅ 酒店Agent: 双{algorithm_name}（线上基础价格 + 线下价格）")
+    else:
+        print(f"✅ 酒店Agent: {algorithm_name}（联合决策线上基础价格 + 线下价格）")
     print(f"✅ OTA Agent: {algorithm_name}（补贴决策）")
     print(f"📊 TensorBoard日志: {log_dir}")
     print(f"💡 查看训练曲线: tensorboard --logdir={PATH_CONFIG.tensorboard_dir}")

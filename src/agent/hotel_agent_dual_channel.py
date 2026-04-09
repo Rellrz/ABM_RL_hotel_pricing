@@ -1,8 +1,9 @@
 """
 双渠道酒店Agent模块
 
-酒店代理，负责分别决策线上基础价格和线下价格
-使用两个独立的CEM算法进行决策
+酒店代理，负责联合决策线上基础价格和线下价格。
+在 `cem` 模式下使用单体多元高斯 CEM 学习价格联动；
+在 `cem_nn` 模式下保持原有神经网络版双头方案。
 
 业务逻辑：
 - 线上价格：给OTA的基础价格（需覆盖佣金成本）
@@ -14,14 +15,16 @@
 import numpy as np
 from collections import defaultdict, deque
 from typing import Union, List, Dict, Any, Tuple
-from src.algorithms.cem import CrossEntropyMethod
 from src.algorithms.cem_nn import NeuralCrossEntropyMethod
+from src.algorithms.multivariate_cem import MultivariateCrossEntropyMethod
 from configs.config import RL_CONFIG
 
 
 class HotelAgentDualChannel:
     """
-    双渠道酒店Agent：使用两个独立的CEM分别决策线上和线下价格
+    双渠道酒店Agent：
+    - cem: 单体多元高斯CEM（2维动作，学习协方差）
+    - cem_nn: 兼容原神经网络方案
     
     状态空间：
     - 库存水平
@@ -77,6 +80,10 @@ class HotelAgentDualChannel:
         self.offline_price_max = offline_price_max
         self.algorithm_type = RL_CONFIG.cem_algorithm
         
+        self.cem_joint = None
+        self.cem_online = None
+        self.cem_offline = None
+
         # 根据配置选择算法
         if self.algorithm_type == 'cem_nn':
             # 使用神经网络版CEM
@@ -110,23 +117,11 @@ class HotelAgentDualChannel:
                 min_std=min_std
             )
         else:
-            # 使用传统表格版CEM
-            self.cem_online = CrossEntropyMethod(
+            # 使用多元高斯CEM（联合动作）
+            self.cem_joint = MultivariateCrossEntropyMethod(
                 n_states=n_states,
-                action_min=online_price_min,
-                action_max=online_price_max,
-                discount_factor=0.99,
-                n_samples=n_samples,
-                elite_frac=elite_frac,
-                initial_std=initial_std,
-                min_std=min_std,
-                std_decay=std_decay
-            )
-            
-            self.cem_offline = CrossEntropyMethod(
-                n_states=n_states,
-                action_min=offline_price_min,
-                action_max=offline_price_max,
+                action_mins=(online_price_min, offline_price_min),
+                action_maxs=(online_price_max, offline_price_max),
                 discount_factor=0.99,
                 n_samples=n_samples,
                 elite_frac=elite_frac,
@@ -217,9 +212,13 @@ class HotelAgentDualChannel:
         else:
             state_idx = state
         
-        # 分别选择动作
-        price_online_base = self.cem_online.select_action(state_idx, deterministic)
-        price_offline = self.cem_offline.select_action(state_idx, deterministic)
+        if self.algorithm_type == 'cem_nn':
+            price_online_base = self.cem_online.select_action(state_idx, deterministic)
+            price_offline = self.cem_offline.select_action(state_idx, deterministic)
+        else:
+            action_pair = self.cem_joint.select_action(state_idx, deterministic)
+            price_online_base = float(action_pair[0])
+            price_offline = float(action_pair[1])
         
         # 约束1：线上基础价格要能覆盖佣金成本
         # 如果线上基础价格*(1-佣金率) < 线下价格，说明线上不划算
@@ -282,18 +281,28 @@ class HotelAgentDualChannel:
         else:
             next_state_idx = next_state
         
-        # 两个CEM使用相同的总收益（简化方案）
-        # 更高级的方案可以根据渠道收益分配权重
-        self.cem_online.update(state_idx, price_online_base, reward, next_state_idx, done)
-        self.cem_offline.update(state_idx, price_offline, reward, next_state_idx, done)
+        if self.algorithm_type == 'cem_nn':
+            self.cem_online.update(state_idx, price_online_base, reward, next_state_idx, done)
+            self.cem_offline.update(state_idx, price_offline, reward, next_state_idx, done)
+        else:
+            self.cem_joint.update(
+                state_idx,
+                np.array([price_online_base, price_offline], dtype=float),
+                reward,
+                next_state_idx,
+                done,
+            )
         
         # 更新统计
         self.total_revenue += reward
     
     def end_episode(self) -> None:
         """结束episode，更新分布参数"""
-        self.cem_online.end_episode()
-        self.cem_offline.end_episode()
+        if self.algorithm_type == 'cem_nn':
+            self.cem_online.end_episode()
+            self.cem_offline.end_episode()
+        else:
+            self.cem_joint.end_episode()
         self.episode_count += 1
     
     def calculate_revenue(self, 
@@ -346,15 +355,7 @@ class HotelAgentDualChannel:
             exploration_rate = max(min_explore, initial_explore * (decay_rate ** episode))
             return exploration_rate
         else:
-            # 传统CEM: 使用标准差表
-            std_online = np.mean([std for std in self.cem_online.std_table.values()]) if self.cem_online.std_table else self.cem_online.initial_std
-            std_offline = np.mean([std for std in self.cem_offline.std_table.values()]) if self.cem_offline.std_table else self.cem_offline.initial_std
-            avg_std = (std_online + std_offline) / 2.0
-            
-            # 归一化到0-1范围
-            normalized_std = avg_std / self.cem_online.initial_std
-            
-            return normalized_std
+            return float(self.cem_joint.get_exploration_scale())
     
     def get_statistics(self) -> Dict[str, float]:
         """
@@ -375,10 +376,12 @@ class HotelAgentDualChannel:
     
     def get_policy(self) -> Dict[str, Dict[Any, float]]:
         """获取当前策略"""
-        return {
-            'online': self.cem_online.get_policy(),
-            'offline': self.cem_offline.get_policy()
-        }
+        if self.algorithm_type == 'cem_nn':
+            return {
+                'online': self.cem_online.get_policy(),
+                'offline': self.cem_offline.get_policy()
+            }
+        return {'joint': self.cem_joint.get_policy()}
     
     @property
     def q_table(self) -> Dict:
@@ -392,8 +395,11 @@ class HotelAgentDualChannel:
         Args:
             filepath: 保存路径（自动添加.json后缀）
         """
-        self.cem_online.save_model('hotel_online')
-        self.cem_offline.save_model('hotel_offline')
+        if self.algorithm_type == 'cem_nn':
+            self.cem_online.save_model('hotel_online')
+            self.cem_offline.save_model('hotel_offline')
+        else:
+            self.cem_joint.save_model('hotel_joint')
         
     
     @classmethod

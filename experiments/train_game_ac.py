@@ -50,6 +50,12 @@ def _run_one_capacity(capacity: int, args_dict: dict) -> dict:
         run_id = f"cap{capacity}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{os.getpid()}"
 
         model_paths = {}
+        if hasattr(hotel_agent, 'cem_joint') and hotel_agent.cem_joint is not None and hasattr(hotel_agent.cem_joint, 'save_model'):
+            prefix = f'hotel_joint_{run_id}'
+            hotel_agent.cem_joint.save_model(prefix)
+            candidates = glob.glob(os.path.join(PATH_CONFIG.models_dir, f'{prefix}_agent_*.json'))
+            if candidates:
+                model_paths['hotel_joint'] = max(candidates, key=os.path.getmtime)
         if hasattr(hotel_agent, 'cem_online') and hasattr(hotel_agent.cem_online, 'save_model'):
             prefix = f'hotel_online_{run_id}'
             hotel_agent.cem_online.save_model(prefix)
