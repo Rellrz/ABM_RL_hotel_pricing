@@ -5,11 +5,11 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debugger train.py",
+            "name": "Debugger train_game.py (Main)",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/experiments/train.py",
-            "args": ["--abm-episodes", "100"],
+            "program": "${workspaceFolder}/experiments/train_game.py",
+            "args": ["--episodes", "100"],
             "console": "integratedTerminal"
         },
         {

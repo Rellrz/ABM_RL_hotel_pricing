@@ -23,13 +23,6 @@ class PathConfig:
     figures_dir: str = os.path.join(PROJECT_ROOT, 'outputs', 'figures')
     tensorboard_dir: str = os.path.join(PROJECT_ROOT, 'outputs', 'tensorboard_logs')
     
-    # 模型保存路径
-    abm_q_table_path: str = os.path.join(PROJECT_ROOT, 'outputs', 'models', 'abm_q_table_{timestamp}.pkl')
-    hotel_agent_path: str = os.path.join(PROJECT_ROOT, 'outputs', 'models', 'hotel_agent_{timestamp}.pkl')
-    ota_agent_path: str = os.path.join(PROJECT_ROOT, 'outputs', 'models', 'ota_agent_{timestamp}.pkl')
-    preprocessor_path: str = os.path.join(PROJECT_ROOT, 'outputs', 'models', 'preprocessor_{timestamp}.pkl')
-    results_path: str = os.path.join(PROJECT_ROOT, 'outputs', 'results', 'results_{timestamp}.pkl')
-
     def __post_init__(self):
         """创建必要的目录"""
         for path in [self.raw_data_dir, self.processed_data_dir, 
@@ -251,34 +244,9 @@ class ABMConfig:
 
 @dataclass
 class RLConfig:
-    """强化学习配置
-    
-    支持两种算法：
-    1. Q-learning: 离散动作空间（36个定价组合）
-    2. Actor-Critic: 连续动作空间（价格范围80-200元）
-    
-    状态空间: 库存档位 × 季节 × 日期类型 = 5 × 3 × 2 = 30种状态
-    """
-    # ========== 算法选择 ==========
-    algorithm: str = 'cem'  # 'q_learning' 或 'actor_critic'
-    
+    """强化学习配置（博弈主线，仅支持CEM/CEM-NN）"""
     # ========== 通用参数 ==========
     n_states: int = 18
-    n_actions: int = 144  # Q-learning使用
-    discount_factor: float = 0.99
-    
-    # ========== Q-learning参数 ==========
-    learning_rate: float = 0.05  # Q-learning学习率
-    epsilon_start: float = 0.9
-    epsilon_end: float = 0.05
-    epsilon_decay_episodes: int = 300  # 延长探索期，避免过早收敛
-    epsilon_min: float = 0.01
-    
-    # ========== Actor-Critic参数 ==========
-    actor_lr: float = 0.002  # Actor学习率（策略更新）- 降低以提高稳定性（0.005）
-    critic_lr: float = 0.02  # Critic学习率（价值更新）（0.05）
-    action_min: float = 80.0  # 最低价格
-    action_max: float = 170.0  # 最高价格
     initial_std: float = 20.0  # 初始探索标准差
     min_std: float = 5.0  # 最小探索标准差 - 极小值减少后期波动
     std_decay: float = 0.999  # 标准差衰减率 - 持续衰减到500轮（0.99）
@@ -314,40 +282,21 @@ class RLConfig:
     offline_price_max: float = 180.0  # 线下价格最大值
     game_training_mode: str = 'simultaneous'  # 训练模式：'fixed_ota', 'alternating', 'simultaneous'
     
-    episodes: int = 250  # Actor-Critic需要更多轮次
+    episodes: int = 250
     online_learning_days: int = 90
     update_frequency: int = 7
     
     enable_online_learning: bool = False
-    
-    online_price_levels: List[int] = field(default_factory=lambda: [80,85, 90, 95, 100, 105,110, 115, 120, 125, 130, 135])
-    offline_price_levels: List[int] = field(default_factory=lambda: [90,95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145])
-    
-    agent_paths: Dict[str, str] = field(default_factory=lambda: {
-        'pretrained': os.path.join(PROJECT_ROOT, '02_训练模型', 'q_agent_pretrained.pkl'),
-        'final': os.path.join(PROJECT_ROOT, '02_训练模型', 'q_agent_final.pkl'),
-        'online': os.path.join(PROJECT_ROOT, '02_训练模型', 'q_agent_online.pkl')
-    })
 
 @dataclass
 class EnvConfig:
     """酒店环境参数，模拟真实的酒店运营环境"""
     
-    initial_inventory: int = 70
-    max_inventory: int = 70
+    initial_inventory: int = 200
+    max_inventory: int = 200
     min_inventory: int = 0
 
     booking_window_days: int = 91
-    
-    online_price_levels: List[int] = field(default_factory=lambda: [80,85, 90, 95, 100, 105,110, 115, 120, 125, 130, 135])
-    offline_price_levels: List[int] = field(default_factory=lambda: [90,95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145])
-    
-    n_actions: int = 144
-    
-    demand_weight: float = 0.7
-    inventory_weight: float = 0.3
-    revenue_weight: float = 1.0
-    booking_weight: float = 0.5
 
 
 @dataclass
@@ -426,51 +375,56 @@ def validate_config() -> bool:
         - 验证数值参数的合理范围
         - 提供配置修复建议
     """
-    import os
-    import typing
-    
-    # 数据文件检查已移除（DATA_CONFIG不存在）
-    
-    # BNN配置已移除，跳过相关检查
-    
-    # 检查RL配置
-    epsilon_start = RL_CONFIG.epsilon_start
-    epsilon_end = RL_CONFIG.epsilon_end
-    discount_factor = RL_CONFIG.discount_factor
-    
-    if epsilon_start < 0 or epsilon_start > 1:
-        print("错误：epsilon_start必须在0和1之间")
+    # 检查CEM算法选择
+    if RL_CONFIG.cem_algorithm not in ("cem", "cem_nn"):
+        print("错误：cem_algorithm必须为'cem'或'cem_nn'")
         return False
-    
-    if epsilon_end < 0 or epsilon_end > 1:
-        print("错误：epsilon_end必须在0和1之间")
+
+    if not (0.0 <= RL_CONFIG.cem_elite_frac <= 1.0):
+        print("错误：cem_elite_frac必须在0和1之间")
         return False
-    
-    if discount_factor < 0 or discount_factor > 1:
-        print("错误：折扣因子必须在0和1之间")
+
+    if RL_CONFIG.cem_n_samples <= 0:
+        print("错误：cem_n_samples必须大于0")
+        return False
+
+    if RL_CONFIG.initial_std <= 0 or RL_CONFIG.min_std <= 0:
+        print("错误：initial_std和min_std必须大于0")
+        return False
+
+    if RL_CONFIG.commission_rate < 0 or RL_CONFIG.commission_rate > 1:
+        print("错误：commission_rate必须在0和1之间")
+        return False
+
+    if RL_CONFIG.subsidy_ratio_min < 0 or RL_CONFIG.subsidy_ratio_max > 1:
+        print("错误：补贴比例必须在0和1之间")
+        return False
+
+    if RL_CONFIG.subsidy_ratio_min > RL_CONFIG.subsidy_ratio_max:
+        print("错误：subsidy_ratio_min不能大于subsidy_ratio_max")
+        return False
+
+    if RL_CONFIG.online_price_min <= 0 or RL_CONFIG.offline_price_min <= 0:
+        print("错误：最低价格必须大于0")
+        return False
+
+    if RL_CONFIG.online_price_min > RL_CONFIG.online_price_max:
+        print("错误：online_price_min不能大于online_price_max")
+        return False
+
+    if RL_CONFIG.offline_price_min > RL_CONFIG.offline_price_max:
+        print("错误：offline_price_min不能大于offline_price_max")
         return False
     
     # 检查环境配置
     initial_inventory = ENV_CONFIG.initial_inventory
-    online_price_levels = ENV_CONFIG.online_price_levels
-    offline_price_levels = ENV_CONFIG.offline_price_levels
-    n_actions = ENV_CONFIG.n_actions
     
     if initial_inventory <= 0:
         print("错误：初始库存必须大于0")
         return False
-    
-    if len(online_price_levels) <= 0 or len(offline_price_levels) <= 0:
-        print("错误：线上和线下价格档位都必须大于0个")
-        return False
-    
-    expected_actions = len(online_price_levels) * len(offline_price_levels)
-    if n_actions != expected_actions:
-        print(f"错误：动作数量必须为{expected_actions}（线上{len(online_price_levels)}×线下{len(offline_price_levels)}组合）")
-        return False
-    
-    if RL_CONFIG.n_actions != n_actions:
-        print(f"错误：RL_CONFIG.n_actions({RL_CONFIG.n_actions}) 必须与 ENV_CONFIG.n_actions({n_actions}) 一致")
+
+    if ENV_CONFIG.booking_window_days <= 0:
+        print("错误：booking_window_days必须大于0")
         return False
     
     return True

@@ -199,69 +199,6 @@ class TrainingMonitor:
             'price': price
         })
     
-    def analyze_exploration_issues(self, q_table: Dict[int, np.ndarray], episode: int) -> Dict[str, Any]:
-        """
-        分析探索问题，特别是零值Q值和低探索覆盖率问题
-        
-        Args:
-            q_table (Dict[int, np.ndarray]): Q表数据
-            episode (int): 当前训练轮次
-            
-        Returns:
-            Dict[str, Any]: 探索问题分析结果
-        """
-        analysis = {
-            'episode': episode,
-            'total_states': len(q_table),
-            'total_actions': 0,
-            'zero_q_count': 0,
-            'explored_pairs': 0,
-            'exploration_coverage': 0.0,
-            'zero_q_percentage': 0.0,
-            'issues': []
-        }
-        
-        if not q_table:
-            analysis['issues'].append('Q表为空')
-            return analysis
-        
-        # 计算总状态-动作对数量
-        n_actions = len(list(q_table.values())[0]) if q_table else 0
-        analysis['total_actions'] = n_actions
-        total_pairs = len(q_table) * n_actions
-        
-        # 统计零值Q值和已探索状态-动作对
-        for state, q_values in q_table.items():
-            for action_idx, q_value in enumerate(q_values):
-                if q_value == 0.0:
-                    analysis['zero_q_count'] += 1
-                if q_value != 0.0:
-                    analysis['explored_pairs'] += 1
-        
-        # 计算覆盖率
-        if total_pairs > 0:
-            analysis['exploration_coverage'] = round(analysis['explored_pairs'] / total_pairs * 100, 1)
-            analysis['zero_q_percentage'] = round(analysis['zero_q_count'] / total_pairs * 100, 1)
-        
-        # 识别具体问题
-        if analysis['exploration_coverage'] < 90:
-            analysis['issues'].append(f'低探索覆盖率: {analysis["exploration_coverage"]}%')
-        
-        if analysis['zero_q_percentage'] > 15:
-            analysis['issues'].append(f'高零值Q值占比: {analysis["zero_q_percentage"]}%')
-        
-        # 识别具体状态的问题
-        problematic_states = []
-        for state, q_values in q_table.items():
-            zero_count = sum(1 for q in q_values if q == 0.0)
-            if zero_count >= n_actions * 0.5:  # 超过一半动作Q值为0
-                problematic_states.append(state)
-        
-        if problematic_states:
-            analysis['issues'].append(f'问题状态: {problematic_states}')
-        
-        return analysis
-        
     def get_training_summary(self) -> Dict[str, Any]:
         """
         获取训练摘要

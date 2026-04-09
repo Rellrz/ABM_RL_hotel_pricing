@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 # 第三方库导入
 import numpy as np
 import pandas as pd
-from scipy import stats
 
 # 本地模块导入
 from configs.config import ABM_CONFIG, RANDOM_CONFIG
@@ -216,7 +215,7 @@ class HotelEnvironment:
     
     def _get_state_for_day_offset(self, day_offset: int) -> Dict[str, Any]:
         """
-        获取未来某一天的状态（用于5天窗口的Q-learning决策）
+        获取未来某一天的状态（用于窗口化连续定价决策）
         
         Args:
             day_offset: 距离当前天的偏移量（0=今天, 1=明天, ..., 4=第5天）
@@ -287,9 +286,9 @@ class HotelEnvironment:
         """
         使用ABM进行需求模拟
         
-        ✅ 5天滚动窗口模式：
+        ✅ 价格窗口模式：
         - 传递当前5天的库存状态
-        - 传递当前5天的价格窗口（每天都通过Q-learning确定）
+        - 传递当前窗口内的价格序列（连续价格）
         - ABM根据客户的target_date选择对应的价格
         
         Args:
@@ -329,21 +328,20 @@ class HotelEnvironment:
         
         return actual_bookings, total_revenue
     
-    def step(self, action: Union[int, List[int]]) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
+    def step(self, action: Union[List[float], List[List[float]], np.ndarray]) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
         """
         执行一步酒店定价决策
         
-        根据给定的定价动作，模拟一天的酒店运营过程，包括：
-        1. 确定定价：将动作索引转换为具体价格（支持线上线下双价格）
-        2. 需求预测：使用线上和线下BNN模型预测需求分布，并相加结果
-        3. 预订处理：根据库存限制确定实际预订量（优先满足线下用户）
-        4. 收益计算：计算当日收益和未来预期收益
-        5. 风险惩罚：基于预测方差添加风险惩罚
-        6. 库存更新：根据β系数更新未来库存
-        7. 状态转移：获取新的环境状态
+        根据给定的连续价格动作，模拟一天酒店运营：
+        1. 接收单日价格对或窗口价格序列
+        2. 调用ABM完成需求与预订仿真
+        3. 更新库存窗口与统计信息
+        4. 返回新状态、收益、终止标记和信息字典
         
         Args:
-            action (Union[int, List[int]]): 定价动作索引（int为单价格，List[int]为双价格[线上, 线下]）
+            action: 连续价格动作，支持两种格式：
+                - [price_online, price_offline]
+                - [[price_online, price_offline], ...]（长度=booking_window_days）
             
         Returns:
             Tuple[Dict[str, Any], float, bool, Dict[str, Any]]: 
@@ -360,80 +358,34 @@ class HotelEnvironment:
         5. 最终奖励 = 总收益
                 
         Note:
-            - 价格档位：线上[80,90,100,110,120,130]，线下[90,105,120,135,150,165]
-            - 需求预测为线上和线下BNN预测结果相加
-            - 收益计算考虑当日入住和未来预期入住
-            - 风险惩罚系数按季节调整（旺季0.1，平季0.25，淡季0.5）
-            - 库存更新使用β系数分布，反映不同入住天数的影响
-            - 支持90天周期模拟，episode在90天时结束
+            - 环境不再接受离散动作索引，仅接受连续价格
+            - 单日价格会自动扩展为“今天更新、其余沿用”的价格窗口
         """
-        # print(f" \n {'+'*15}一个episode开始{'+'*15}")
-        # 定价动作（线上线下双价格映射）
-        # 从配置文件读取定价档位
+        if not isinstance(action, (list, np.ndarray)):
+            raise ValueError(f"不支持的动作类型: {type(action)}，请传入价格对或价格窗口。")
 
-        online_prices = ENV_CONFIG.online_price_levels  # 线上价格档位（6个动作）
-        offline_prices = ENV_CONFIG.offline_price_levels  # 线下价格档位（6个动作）
-        
-        # ✅ 支持两种动作类型：
-        # 1. 离散动作（Q-learning）：动作索引 0-35
-        # 2. 连续动作（Actor-Critic）：直接价格值 80-200
-        # 3. 博弈模式：[price_online, price_offline]
-        
-        if isinstance(action, (list, np.ndarray)) and len(action) == 2:
-            # 博弈模式：直接指定线上和线下价格
-            price_online, price_offline = action
-            price_windows_online = [float(price_online)] + self.current_price_window_online[1:]
-            price_windows_offline = [float(price_offline)] + self.current_price_window_offline[1:]
-            
-        elif isinstance(action, (list, np.ndarray)) and len(action) in (5, self.booking_window_days):
-            actions_window = list(action)
-            price_windows_online = []
-            price_windows_offline = []
-            
-            for act in actions_window:
-                # 检查是否是[price_online, price_offline]对（博弈模式）
-                if isinstance(act, (list, np.ndarray)) and len(act) == 2:
-                    # 博弈模式：直接指定线上和线下价格
-                    price_online, price_offline = act
-                    price_windows_online.append(float(price_online))
-                    price_windows_offline.append(float(price_offline))
-                # 判断是离散还是连续动作
-                elif isinstance(act, (int, np.integer)) or (isinstance(act, (float, np.floating)) and act < 50):
-                    # 离散动作：动作索引 (0-35)
-                    act_idx = int(act.item()) if hasattr(act, 'item') else int(act)
-                    n_offline = len(offline_prices)
-                    online_idx = act_idx // n_offline
-                    offline_idx = act_idx % n_offline
-                    price_windows_online.append(online_prices[online_idx])
-                    price_windows_offline.append(offline_prices[offline_idx])
-                else:
-                    # 连续动作：直接价格值 (80-200)
-                    price = float(act.item()) if hasattr(act, 'item') else float(act)
-                    # 线上和线下使用相同价格（简化处理）
-                    price_windows_online.append(price)
-                    price_windows_offline.append(price * 1.1)  # 线下价格略高于线上
-                    
-        elif isinstance(action, (int, np.integer)) or (isinstance(action, (float, np.floating)) and hasattr(action, 'item')):
-            # 单个动作
-            if isinstance(action, (int, np.integer)) or (isinstance(action, (float, np.floating)) and action < 50):
-                # 离散动作
-                action_idx = int(action.item()) if hasattr(action, 'item') else int(action)
-                n_offline = len(offline_prices)
-                online_idx = action_idx // n_offline
-                offline_idx = action_idx % n_offline
-
-                price_online = online_prices[online_idx]
-                price_offline = offline_prices[offline_idx]
-            else:
-                # 连续动作
-                price = float(action.item()) if hasattr(action, 'item') else float(action)
-                price_online = price
-                price_offline = price * 1.1
-                
+        action_list = list(action)
+        if len(action_list) == 2 and not isinstance(action_list[0], (list, np.ndarray)):
+            # 单日价格对：[online, offline]
+            price_online = float(action_list[0])
+            price_offline = float(action_list[1])
             price_windows_online = [price_online] + self.current_price_window_online[1:]
             price_windows_offline = [price_offline] + self.current_price_window_offline[1:]
+        elif len(action_list) == self.booking_window_days:
+            # 完整窗口：[[online, offline], ...]
+            price_windows_online = []
+            price_windows_offline = []
+            for i, pair in enumerate(action_list):
+                if not isinstance(pair, (list, np.ndarray)) or len(pair) != 2:
+                    raise ValueError(
+                        f"窗口动作第{i}项格式错误，期望[online, offline]，实际: {pair}"
+                    )
+                price_windows_online.append(float(pair[0]))
+                price_windows_offline.append(float(pair[1]))
         else:
-            raise ValueError(f"不支持的动作类型: {action}, 类型: {type(action)}")
+            raise ValueError(
+                f"动作长度不合法: {len(action_list)}，仅支持2或{self.booking_window_days}。"
+            )
             
         actual_bookings, total_revenue = self._step_with_abm(price_windows_online, price_windows_offline)
             
