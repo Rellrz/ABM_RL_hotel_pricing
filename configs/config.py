@@ -276,6 +276,10 @@ class RLConfig:
     commission_rate: float = 0.30  # OTA佣金率（15%）
     subsidy_ratio_min: float = 0.0  # OTA补贴比例最小值（0%，不补贴）
     subsidy_ratio_max: float = 0.8  # OTA补贴比例最大值（80%，最多补贴佣金的80%）
+    ota_delta_max: float = 15.0  # OTA目标价差上限（元）
+    ota_decay_lambda: float = 0.05  # lead_time指数衰减系数
+    ota_noise_std: float = 0.05  # 补贴比例高斯扰动标准差
+    ota_seed: int = 42  # OTA启发式随机种子
     online_price_min: float = 80.0  # 线上基础价格最小值（需覆盖佣金）
     online_price_max: float = 180.0  # 线上基础价格最大值
     offline_price_min: float = 80.0  # 线下价格最小值
@@ -402,6 +406,18 @@ def validate_config() -> bool:
 
     if RL_CONFIG.subsidy_ratio_min > RL_CONFIG.subsidy_ratio_max:
         print("错误：subsidy_ratio_min不能大于subsidy_ratio_max")
+        return False
+
+    if RL_CONFIG.ota_delta_max < 0:
+        print("错误：ota_delta_max不能小于0")
+        return False
+
+    if RL_CONFIG.ota_decay_lambda < 0:
+        print("错误：ota_decay_lambda不能小于0")
+        return False
+
+    if RL_CONFIG.ota_noise_std < 0:
+        print("错误：ota_noise_std不能小于0")
         return False
 
     if RL_CONFIG.online_price_min <= 0 or RL_CONFIG.offline_price_min <= 0:

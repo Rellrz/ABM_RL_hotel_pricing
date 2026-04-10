@@ -18,7 +18,7 @@ from tensorboardX import SummaryWriter
 from configs.config import RL_CONFIG, ENV_CONFIG, PATH_CONFIG
 from src.environment.hotel_env import HotelEnvironment
 from src.agent.hotel_agent_dual_channel import HotelAgentDualChannel
-from src.agent.ota_agent import OTAAgent
+from src.agent.ota_agent import OTASubsidyHeuristic
 
 def _parse_buckets(spec: Optional[str], n: int) -> List[Tuple[int, int]]:
     if n <= 5:
@@ -52,7 +52,7 @@ def train_game_system(historical_data: pd.DataFrame,
                       training_mode: str = 'simultaneous',
                       update_frequency: int = 10,
                       booking_window_days: int = 5,
-                      decision_buckets: str = '') -> Tuple[HotelAgentDualChannel, OTAAgent, List, List, List]:
+                      decision_buckets: str = '') -> Tuple[HotelAgentDualChannel, OTASubsidyHeuristic, List, List, List]:
     """
     训练酒店-OTA博弈系统
     
@@ -74,7 +74,7 @@ def train_game_system(historical_data: pd.DataFrame,
     print(f"\n=== 训练酒店-OTA博弈系统 ({episodes}轮) ===")
     print(f"训练模式: {training_mode}")
     print(f"佣金率: {RL_CONFIG.commission_rate * 100:.1f}%")
-    print(f"补贴比例范围: {RL_CONFIG.subsidy_ratio_min * 100:.1f}% - {RL_CONFIG.subsidy_ratio_max * 100:.1f}%")
+    print(f"补贴比例范围: 0.0% - {RL_CONFIG.subsidy_ratio_max * 100:.1f}%")
     
     buckets = _parse_buckets(decision_buckets, booking_window_days)
     n_stages = len(buckets) if buckets else 1
@@ -100,17 +100,14 @@ def train_game_system(historical_data: pd.DataFrame,
         std_decay=RL_CONFIG.std_decay
     )
     
-    # 创建OTA Agent（90×K）
-    ota_agent = OTAAgent(
+    # 创建OTA启发式外生策略
+    ota_agent = OTASubsidyHeuristic(
         commission_rate=RL_CONFIG.commission_rate,
-        subsidy_ratio_min=RL_CONFIG.subsidy_ratio_min,
-        subsidy_ratio_max=RL_CONFIG.subsidy_ratio_max,
-        n_states=90 * n_stages,
-        n_samples=RL_CONFIG.cem_n_samples,
-        elite_frac=RL_CONFIG.cem_elite_frac,
-        initial_std=0.2,
-        min_std=0.02,
-        std_decay=RL_CONFIG.std_decay
+        r_max=RL_CONFIG.subsidy_ratio_max,
+        delta_max=RL_CONFIG.ota_delta_max,
+        decay_lambda=RL_CONFIG.ota_decay_lambda,
+        noise_std=RL_CONFIG.ota_noise_std,
+        seed=RL_CONFIG.ota_seed
     )
     
     # 训练记录
@@ -135,7 +132,7 @@ def train_game_system(historical_data: pd.DataFrame,
         print(f"✅ 酒店Agent: 双{algorithm_name}（线上基础价格 + 线下价格）")
     else:
         print(f"✅ 酒店Agent: {algorithm_name}（联合决策线上基础价格 + 线下价格）")
-    print(f"✅ OTA Agent: {algorithm_name}（补贴决策）")
+    print("✅ OTA: 启发式外生补贴策略（时间敏感 + 随机扰动）")
     print(f"📊 TensorBoard日志: {log_dir}")
     print(f"💡 查看训练曲线: tensorboard --logdir={PATH_CONFIG.tensorboard_dir}")
     
@@ -158,7 +155,6 @@ def train_game_system(historical_data: pd.DataFrame,
         trigger_offsets = sorted({int(e) for _, e in buckets if 0 <= int(e) < booking_window_days})
 
         train_hotel = training_mode in ('simultaneous', 'fixed_ota') or (training_mode == 'alternating' and episode % 2 == 0)
-        train_ota = training_mode == 'simultaneous' or (training_mode == 'alternating' and episode % 2 == 1)
 
         price_online_base_by_offset = [0.0] * booking_window_days
         price_offline_by_offset = [0.0] * booking_window_days
@@ -182,7 +178,7 @@ def train_game_system(historical_data: pd.DataFrame,
                 else:
                     sr = 0.7
             else:
-                sr = ota_agent.select_action(pob, pof, st, deterministic=False)
+                sr = ota_agent.get_subsidy(pob, pof, lead_time=ref_off)
 
             for off in range(int(s), min(int(e) + 1, booking_window_days)):
                 price_online_base_by_offset[off] = float(pob)
@@ -206,7 +202,6 @@ def train_game_system(historical_data: pd.DataFrame,
 
                     total_system_profit_acc = revenue_hotel_acc + profit_ota_acc
                     reward_hotel_acc = RL_CONFIG.reward_hotel_ratio * revenue_hotel_acc + (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit_acc
-                    reward_ota_acc = RL_CONFIG.reward_ota_ratio * profit_ota_acc + (1 - RL_CONFIG.reward_ota_ratio) * total_system_profit_acc
 
                     state_for_update = dict(decision_state_by_offset[off])
                     next_state_for_update = dict(env._get_state_for_day_offset(off))
@@ -214,8 +209,6 @@ def train_game_system(historical_data: pd.DataFrame,
 
                     if train_hotel:
                         hotel_agent.update(state_for_update, np.array([pob_prev, pof_prev]), reward_hotel_acc, next_state_for_update, done=False, ota_subsidy=subsidy_cost_acc)
-                    if train_ota and training_mode != 'fixed_ota':
-                        ota_agent.update(pob_prev, pof_prev, state_for_update, sr_prev, reward_ota_acc, next_state_for_update, done=False)
 
                 acc_bookings_online_by_offset[off] = 0
                 acc_bookings_offline_by_offset[off] = 0
@@ -234,7 +227,7 @@ def train_game_system(historical_data: pd.DataFrame,
                     else:
                         sr = 0.7
                 else:
-                    sr = ota_agent.select_action(pob, pof, st, deterministic=False)
+                    sr = ota_agent.get_subsidy(pob, pof, lead_time=off)
 
                 price_online_base_by_offset[off] = float(pob)
                 price_offline_by_offset[off] = float(pof)
@@ -305,8 +298,6 @@ def train_game_system(historical_data: pd.DataFrame,
             if update_frequency > 0 and (day + 1) % update_frequency == 0:
                 if train_hotel:
                     hotel_agent.end_episode()
-                if train_ota and training_mode != 'fixed_ota':
-                    ota_agent.end_episode()
 
             if done:
                 break
@@ -335,7 +326,6 @@ def train_game_system(historical_data: pd.DataFrame,
 
             total_system_profit_acc = revenue_hotel_acc + profit_ota_acc
             reward_hotel_acc = RL_CONFIG.reward_hotel_ratio * revenue_hotel_acc + (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit_acc
-            reward_ota_acc = RL_CONFIG.reward_ota_ratio * profit_ota_acc + (1 - RL_CONFIG.reward_ota_ratio) * total_system_profit_acc
 
             state_for_update = dict(decision_state_by_offset[off])
             next_state_for_update = dict(env._get_state_for_day_offset(off))
@@ -343,14 +333,10 @@ def train_game_system(historical_data: pd.DataFrame,
 
             if train_hotel:
                 hotel_agent.update(state_for_update, np.array([pob_prev, pof_prev]), reward_hotel_acc, next_state_for_update, done=True, ota_subsidy=subsidy_cost_acc)
-            if train_ota and training_mode != 'fixed_ota':
-                ota_agent.update(pob_prev, pof_prev, state_for_update, sr_prev, reward_ota_acc, next_state_for_update, done=True)
 
         if update_frequency <= 0 or 365 % update_frequency != 0:
             if train_hotel:
                 hotel_agent.end_episode()
-            if train_ota and training_mode != 'fixed_ota':
-                ota_agent.end_episode()
         
         # 记录
         episode_rewards_hotel.append(total_reward_hotel)

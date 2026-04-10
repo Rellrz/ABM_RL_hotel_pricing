@@ -68,9 +68,9 @@ def _run_one_capacity(capacity: int, args_dict: dict) -> dict:
             candidates = glob.glob(os.path.join(PATH_CONFIG.models_dir, f'{prefix}_agent_*.json'))
             if candidates:
                 model_paths['hotel_offline'] = max(candidates, key=os.path.getmtime)
-        if hasattr(ota_agent, 'cem') and hasattr(ota_agent.cem, 'save_model'):
+        if hasattr(ota_agent, 'save_model'):
             prefix = f'ota_{run_id}'
-            ota_agent.cem.save_model(prefix)
+            ota_agent.save_model(prefix)
             candidates = glob.glob(os.path.join(PATH_CONFIG.models_dir, f'{prefix}_agent_*.json'))
             if candidates:
                 model_paths['ota'] = max(candidates, key=os.path.getmtime)

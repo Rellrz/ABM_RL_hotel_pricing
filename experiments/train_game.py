@@ -72,9 +72,9 @@ def main():
     
     # 保存模型参数
     hotel_agent.save()
-    ota_agent.save()
+    #ota_agent.save()
 
-    # 绘制结果
+    # 绘制结果图表
     figure_dir = os.path.join(PROJECT_ROOT, 'outputs', 'figures')
     os.makedirs(figure_dir, exist_ok=True)
     figure_path = os.path.join(figure_dir, f'game_results_{timestamp}.png')
