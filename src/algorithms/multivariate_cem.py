@@ -36,6 +36,7 @@ class MultivariateCrossEntropyMethod:
         memory_size: int = 100,
         alpha: float = 0.3,
         cov_reg: float = 1e-5,
+        min_update_samples: int = None,
     ):
         self.n_states = int(n_states)
         self.action_mins = np.array(action_mins, dtype=float)
@@ -59,6 +60,11 @@ class MultivariateCrossEntropyMethod:
         self.initial_std_vec = np.maximum(init_std_vec, self.min_std)
         self.initial_cov = np.diag(self.initial_std_vec ** 2)
         self.initial_mean = (self.action_mins + self.action_maxs) / 2.0
+        if min_update_samples is None:
+            # 比 n_elite 更严格的稳定更新阈值，减少小样本协方差抖动
+            self.min_update_samples = max(self.n_elite * 2, 20)
+        else:
+            self.min_update_samples = max(int(min_update_samples), self.n_elite)
 
         self.mean_table = defaultdict(lambda: self.initial_mean.copy())
         self.cov_table = defaultdict(lambda: self.initial_cov.copy())
@@ -143,13 +149,13 @@ class MultivariateCrossEntropyMethod:
         self.state_visit_count[state_key] += 1
         return float(reward)
 
-    def _update_distribution(self, state_key: Any) -> None:
-        if len(self.memory[state_key]) < self.n_elite:
-            return
+    def _update_distribution(self, state_key: Any) -> bool:
+        if len(self.memory[state_key]) < self.min_update_samples:
+            return False
 
         recent = list(self.memory[state_key])[-self.n_samples :]
         if len(recent) < self.n_elite:
-            return
+            return False
 
         actions = np.array([exp["action"] for exp in recent], dtype=float)  # (N,2)
         rewards = np.array([exp["reward"] for exp in recent], dtype=float)  # (N,)
@@ -175,15 +181,18 @@ class MultivariateCrossEntropyMethod:
         self.mean_table[state_key] = np.clip(mu_new, self.action_mins, self.action_maxs)
         self.cov_table[state_key] = cov_new
         self.update_count += 1
+        return True
 
     def end_episode(self) -> None:
         self.episode_count += 1
+        updated_states = []
         for state_key in list(self.memory.keys()):
-            self._update_distribution(state_key)
+            if self._update_distribution(state_key):
+                updated_states.append(state_key)
 
-        # Matrix-aware exploration decay: scale covariance by std_decay^2.
+        # 仅对本轮实际完成参数更新的状态执行协方差衰减
         decay_scale = self.std_decay ** 2
-        for state_key in list(self.cov_table.keys()):
+        for state_key in updated_states:
             decayed = self.cov_table[state_key] * decay_scale
             self.cov_table[state_key] = self._sanitize_cov(decayed)
 
@@ -220,6 +229,7 @@ class MultivariateCrossEntropyMethod:
             "std_decay": self.std_decay,
             "alpha": self.alpha,
             "cov_reg": self.cov_reg,
+            "min_update_samples": self.min_update_samples,
             "means": {str(k): v.tolist() for k, v in self.mean_table.items()},
             "covs": {str(k): v.tolist() for k, v in self.cov_table.items()},
             "state_visit_count": {str(k): int(v) for k, v in self.state_visit_count.items()},
