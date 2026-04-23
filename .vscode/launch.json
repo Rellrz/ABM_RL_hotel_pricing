@@ -21,6 +21,14 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "Debugger experiment2",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/experiment2_ablation_comparison/main.py",
+            "args": ["--mode", "debug"],
+            "console": "integratedTerminal"
+        },
+        {
             "type": "node-terminal",
             "name": "JavaScript 调试终端",
             "request": "launch",

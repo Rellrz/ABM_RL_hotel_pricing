@@ -22,23 +22,31 @@ def holm_correction(p_values: List[float]) -> List[float]:
     return adjusted.tolist()
 
 
-def build_performance_table(df: pd.DataFrame) -> pd.DataFrame:
-    rows: List[Dict] = []
-    for algo in sorted(df["Algorithm"].unique()):
-        sub = df[df["Algorithm"] == algo].copy()
-        per_seed_max = sub.groupby("Seed")["EvalReward"].max()
-        mean_max = float(per_seed_max.mean())
+def build_performance_table(training_df: pd.DataFrame, eval_df: pd.DataFrame) -> pd.DataFrame:
+    if eval_df is None or len(eval_df) == 0:
+        return pd.DataFrame()
 
-        # 90% own max 收敛步数：按每个seed自身max定义
+    per_seed_eval = (
+        eval_df.groupby(["Algorithm", "Seed"], as_index=False)["EvalRevenue"]
+        .mean()
+        .rename(columns={"EvalRevenue": "SeedMeanEvalRevenue"})
+    )
+    rows: List[Dict] = []
+    for algo in sorted(per_seed_eval["Algorithm"].unique()):
+        sub_eval = per_seed_eval[per_seed_eval["Algorithm"] == algo].copy()
+        mean_eval = float(sub_eval["SeedMeanEvalRevenue"].mean())
+
+        # 90% own max 收敛轮次：按每个seed自身训练收益定义
         conv_steps = []
-        for seed, seed_df in sub.groupby("Seed"):
-            seed_df = seed_df.sort_values("Timesteps")
-            target = 0.9 * float(seed_df["EvalReward"].max())
-            hit = seed_df[seed_df["EvalReward"] >= target]
+        sub_train = training_df[training_df["Algorithm"] == algo].copy()
+        for _, seed_df in sub_train.groupby("Seed"):
+            seed_df = seed_df.sort_values("Episode")
+            target = 0.9 * float(seed_df["EpisodeRevenue"].max())
+            hit = seed_df[seed_df["EpisodeRevenue"] >= target]
             if len(hit) == 0:
                 conv_steps.append(np.nan)
             else:
-                conv_steps.append(float(hit.iloc[0]["Timesteps"]))
+                conv_steps.append(float(hit.iloc[0]["Episode"]))
         mean_conv = float(np.nanmean(conv_steps))
 
         if algo == "Multivariate CEM":
@@ -53,15 +61,17 @@ def build_performance_table(df: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "Algorithm": algo,
-                "Mean Max Reward (30 runs)": mean_max,
-                "Convergence Steps (90% Own Max)": mean_conv,
+                "Mean Post-Eval Revenue (Seed Avg)": mean_eval,
+                "Convergence Episode (90% Own Max)": mean_conv,
                 "Parameter Count (Complexity)": params,
             }
         )
     return pd.DataFrame(rows)
 
 
-def significance_tests(df: pd.DataFrame) -> pd.DataFrame:
+def significance_tests(eval_df: pd.DataFrame) -> pd.DataFrame:
+    if eval_df is None or len(eval_df) == 0:
+        return pd.DataFrame()
     try:
         from scipy.stats import mannwhitneyu, ttest_ind
     except Exception:
@@ -69,20 +79,20 @@ def significance_tests(df: pd.DataFrame) -> pd.DataFrame:
             [{"note": "scipy not installed, significance tests skipped"}]
         )
 
-    # 用每个seed的最大评估收益做算法间比较
-    per_seed_max = (
-        df.groupby(["Algorithm", "Seed"])["EvalReward"]
-        .max()
+    # 用每个seed的后评估均值做算法间比较
+    per_seed_mean = (
+        eval_df.groupby(["Algorithm", "Seed"])["EvalRevenue"]
+        .mean()
         .reset_index()
     )
-    ours = per_seed_max[per_seed_max["Algorithm"] == "Multivariate CEM"]["EvalReward"].values
+    ours = per_seed_mean[per_seed_mean["Algorithm"] == "Multivariate CEM"]["EvalRevenue"].values
     rows = []
     pvals = []
     tmp_rows = []
-    for algo in sorted(per_seed_max["Algorithm"].unique()):
+    for algo in sorted(per_seed_mean["Algorithm"].unique()):
         if algo == "Multivariate CEM":
             continue
-        other = per_seed_max[per_seed_max["Algorithm"] == algo]["EvalReward"].values
+        other = per_seed_mean[per_seed_mean["Algorithm"] == algo]["EvalRevenue"].values
         t_stat, t_p = ttest_ind(ours, other, equal_var=False)
         u_stat, u_p = mannwhitneyu(ours, other, alternative="two-sided")
         effect = float(np.mean(ours) - np.mean(other))

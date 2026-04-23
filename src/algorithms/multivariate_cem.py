@@ -37,6 +37,7 @@ class MultivariateCrossEntropyMethod:
         alpha: float = 0.3,
         cov_reg: float = 1e-5,
         min_update_samples: int = None,
+        diagonal_covariance: bool = False,
     ):
         self.n_states = int(n_states)
         self.action_mins = np.array(action_mins, dtype=float)
@@ -49,6 +50,7 @@ class MultivariateCrossEntropyMethod:
         self.memory_size = int(memory_size)
         self.alpha = float(alpha)
         self.cov_reg = float(cov_reg)
+        self.diagonal_covariance = bool(diagonal_covariance)
 
         if np.isscalar(initial_std):
             init_std_vec = np.array([float(initial_std), float(initial_std)], dtype=float)
@@ -91,6 +93,11 @@ class MultivariateCrossEntropyMethod:
         cov[0, 0], cov[1, 1] = d[0], d[1]
         cov[0, 0] += self.cov_reg
         cov[1, 1] += self.cov_reg
+
+        if self.diagonal_covariance:
+            cov[0, 1] = 0.0
+            cov[1, 0] = 0.0
+            return cov
 
         # Project to PSD by clipping eigenvalues.
         vals, vecs = np.linalg.eigh(cov)
@@ -169,6 +176,8 @@ class MultivariateCrossEntropyMethod:
             cov_hat = np.diag([float(cov_hat), float(cov_hat)])
         elif cov_hat.shape == (2,):
             cov_hat = np.diag(cov_hat)
+        if self.diagonal_covariance:
+            cov_hat = np.diag(np.diag(cov_hat))
         cov_hat = self._sanitize_cov(cov_hat)
 
         mu_old = self.mean_table[state_key]
@@ -221,7 +230,7 @@ class MultivariateCrossEntropyMethod:
         save_path = os.path.join(PATH_CONFIG.models_dir, f"{file_name}_agent_{timestamp}.json")
 
         save_dict = {
-            "algo": "multivariate_cem",
+            "algo": "multivariate_cem_diag" if self.diagonal_covariance else "multivariate_cem",
             "action_mins": self.action_mins.tolist(),
             "action_maxs": self.action_maxs.tolist(),
             "initial_std_vec": self.initial_std_vec.tolist(),
@@ -229,6 +238,7 @@ class MultivariateCrossEntropyMethod:
             "std_decay": self.std_decay,
             "alpha": self.alpha,
             "cov_reg": self.cov_reg,
+            "diagonal_covariance": self.diagonal_covariance,
             "min_update_samples": self.min_update_samples,
             "means": {str(k): v.tolist() for k, v in self.mean_table.items()},
             "covs": {str(k): v.tolist() for k, v in self.cov_table.items()},

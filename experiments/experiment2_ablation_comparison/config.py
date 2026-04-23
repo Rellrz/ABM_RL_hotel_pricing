@@ -32,10 +32,9 @@ class Experiment2Config:
     # 运行规模（可切换）
     # -----------------------------
     run_mode: str = "debug"  # debug / medium / full
-    steps_per_eval: int = 10_000
-    eval_episodes: int = 10
+    post_eval_episodes: int = 30
     days_per_episode: int = 365
-    n_jobs: int = 8
+    n_jobs: int = 1
 
     # -----------------------------
     # 环境与业务参数（与现有项目对齐）
@@ -87,11 +86,12 @@ class Experiment2Config:
     # -----------------------------
     # 路径
     # -----------------------------
-    results_csv_path: Path = RESULTS_DIR / "experiment2_results.csv"
+    training_csv_path: Path = RESULTS_DIR / "experiment2_training.csv"
+    evaluation_csv_path: Path = RESULTS_DIR / "experiment2_post_eval.csv"
     summary_json_path: Path = RESULTS_DIR / "experiment2_summary.json"
     stats_csv_path: Path = RESULTS_DIR / "experiment2_stats.csv"
-    learning_curve_pdf: Path = FIGURES_DIR / "learning_curves.pdf"
-    covariance_pdf: Path = FIGURES_DIR / "covariance_evolution.pdf"
+    learning_curve_pdf: Path = FIGURES_DIR / "episode_revenue_curves.pdf"
+    eval_bar_pdf: Path = FIGURES_DIR / "post_eval_bar_with_errorbars.pdf"
     performance_table_csv: Path = RESULTS_DIR / "performance_table.csv"
 
     def ensure_dirs(self) -> None:
@@ -102,9 +102,9 @@ class Experiment2Config:
     @property
     def mode_profile(self) -> Dict[str, int]:
         profiles = {
-            "debug": {"n_seeds": 5, "train_steps": 50_000},
-            "medium": {"n_seeds": 10, "train_steps": 200_000},
-            "full": {"n_seeds": 30, "train_steps": 500_000},
+            "debug": {"n_seeds": 5, "train_episodes": 137},
+            "medium": {"n_seeds": 10, "train_episodes": 548},
+            "full": {"n_seeds": 30, "train_episodes": 1370},
         }
         if self.run_mode not in profiles:
             raise ValueError(f"Unknown run_mode={self.run_mode}")
@@ -115,8 +115,12 @@ class Experiment2Config:
         return int(self.mode_profile["n_seeds"])
 
     @property
+    def train_episodes(self) -> int:
+        return int(self.mode_profile["train_episodes"])
+
+    @property
     def train_steps(self) -> int:
-        return int(self.mode_profile["train_steps"])
+        return int(self.train_episodes * self.days_per_episode)
 
     @property
     def seed_list(self) -> List[int]:

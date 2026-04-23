@@ -15,15 +15,17 @@ from env_wrappers.base_simulator import BucketPricingSimulator
 from evaluation.evaluator import evaluate_policy
 
 
-def run_qlearning(config: Experiment2Config, historical_data) -> List[Dict]:
-    records: List[Dict] = []
+def run_qlearning(config: Experiment2Config, historical_data) -> tuple[List[Dict], List[Dict]]:
+    all_train_records: List[Dict] = []
+    all_eval_records: List[Dict] = []
     if config.n_jobs <= 1:
         for seed in tqdm(config.seed_list, desc="Q-learning Seeds", unit="seed"):
             tqdm.write(f"[Q-learning] Seed {seed} start")
-            seed_records, _seed = _run_single_seed(config, historical_data, seed, show_progress=True)
-            records.extend(seed_records)
-            tqdm.write(f"[Q-learning] Seed {_seed} done: eval={len(seed_records)}")
-        return records
+            seed_train_records, seed_eval_records, _seed = _run_single_seed(config, historical_data, seed, show_progress=True)
+            all_train_records.extend(seed_train_records)
+            all_eval_records.extend(seed_eval_records)
+            tqdm.write(f"[Q-learning] Seed {_seed} done: ep={len(seed_train_records)}")
+        return all_train_records, all_eval_records
 
     futures = []
     with ProcessPoolExecutor(max_workers=config.n_jobs) as ex:
@@ -32,11 +34,12 @@ def run_qlearning(config: Experiment2Config, historical_data) -> List[Dict]:
 
         with tqdm(total=len(futures), desc="Q-learning Seeds", unit="seed") as pbar:
             for fut in as_completed(futures):
-                seed_records, seed = fut.result()
-                records.extend(seed_records)
+                seed_train_records, seed_eval_records, seed = fut.result()
+                all_train_records.extend(seed_train_records)
+                all_eval_records.extend(seed_eval_records)
                 pbar.update(1)
-                tqdm.write(f"[Q-learning] Seed {seed} done: eval={len(seed_records)}")
-    return records
+                tqdm.write(f"[Q-learning] Seed {seed} done: ep={len(seed_train_records)}")
+    return all_train_records, all_eval_records
 
 
 def _run_single_seed(
@@ -44,8 +47,9 @@ def _run_single_seed(
     historical_data,
     seed: int,
     show_progress: bool = True,
-) -> tuple[List[Dict], int]:
-    records: List[Dict] = []
+) -> tuple[List[Dict], List[Dict], int]:
+    train_records: List[Dict] = []
+    eval_records: List[Dict] = []
     agent = QLearningAgent(config=config, seed=seed)
     sim = BucketPricingSimulator(config=config, seed=seed, historical_data=historical_data)
     sim.reset()
@@ -59,6 +63,8 @@ def _run_single_seed(
     sim.initialize_episode_decisions(init_actions)
     steps = 0
     done = False
+    episode_idx = 0
+    episode_revenue = 0.0
     pbar = tqdm(
         total=config.train_steps,
         desc=f"Q Seed {seed}",
@@ -88,6 +94,7 @@ def _run_single_seed(
             stage_actions.append((float(a[0]), float(a[1])))
 
         out = sim.step_day(stage_actions)
+        episode_revenue += float(out.reward_hotel)
         update_events = out.info.get("update_events", [])
         for ev in update_events:
             s = state_to_144(ev.state, int(ev.state.get("stage_id", 0)))
@@ -102,30 +109,42 @@ def _run_single_seed(
         steps += 1
         pbar.update(1)
         done = out.done
-
-        if steps % config.steps_per_eval == 0:
-
-            def stage_policy_fn(stage_id: int, st: dict):
-                s_idx = state_to_144(st, stage_id)
-                a_idx = agent.select_action(s_idx, deterministic=True)
-                a = config.q_action_grid[a_idx]
-                return float(a[0]), float(a[1])
-
-            eval_reward = evaluate_policy(
-                config=config,
-                historical_data=historical_data,
-                seed=seed + 300_000,
-                stage_policy_fn=stage_policy_fn,
-                n_episodes=config.eval_episodes,
-            )
-            records.append(
+        if done:
+            episode_idx += 1
+            train_records.append(
                 {
                     "Algorithm": "Q-learning",
                     "Seed": seed,
-                    "Timesteps": steps,
-                    "EvalReward": eval_reward,
+                    "Episode": episode_idx,
+                    "EpisodeRevenue": float(episode_revenue),
                 }
             )
-            pbar.set_postfix({"eval": f"{eval_reward:.1f}", "day": sim.day})
+            episode_revenue = 0.0
+
+        pbar.set_postfix({"ep": episode_idx, "day": sim.day})
+
     pbar.close()
-    return records, seed
+
+    def stage_policy_fn(stage_id: int, st: dict):
+        s_idx = state_to_144(st, stage_id)
+        a_idx = agent.select_action(s_idx, deterministic=True)
+        a = config.q_action_grid[a_idx]
+        return float(a[0]), float(a[1])
+
+    eval_rewards = evaluate_policy(
+        config=config,
+        historical_data=historical_data,
+        seed=seed + 300_000,
+        stage_policy_fn=stage_policy_fn,
+        n_episodes=config.post_eval_episodes,
+    )
+    for idx, rew in enumerate(eval_rewards, start=1):
+        eval_records.append(
+            {
+                "Algorithm": "Q-learning",
+                "Seed": seed,
+                "EvalEpisode": idx,
+                "EvalRevenue": float(rew),
+            }
+        )
+    return train_records, eval_records, seed

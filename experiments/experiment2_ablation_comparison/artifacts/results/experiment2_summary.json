@@ -1,0 +1,15 @@
+{
+  "mode": "debug",
+  "n_training_records": 1370,
+  "n_eval_records": 300,
+  "algorithms": [
+    "Independent CEM",
+    "Multivariate CEM"
+  ],
+  "training_csv": "/Users/raily/Desktop/hotel_pricing/ABM_hotel_pricing/experiments/experiment2_ablation_comparison/artifacts/results/experiment2_training.csv",
+  "evaluation_csv": "/Users/raily/Desktop/hotel_pricing/ABM_hotel_pricing/experiments/experiment2_ablation_comparison/artifacts/results/experiment2_post_eval.csv",
+  "learning_curve_pdf": "/Users/raily/Desktop/hotel_pricing/ABM_hotel_pricing/experiments/experiment2_ablation_comparison/artifacts/figures/episode_revenue_curves.pdf",
+  "eval_bar_pdf": "/Users/raily/Desktop/hotel_pricing/ABM_hotel_pricing/experiments/experiment2_ablation_comparison/artifacts/figures/post_eval_bar_with_errorbars.pdf",
+  "performance_table_csv": "/Users/raily/Desktop/hotel_pricing/ABM_hotel_pricing/experiments/experiment2_ablation_comparison/artifacts/results/performance_table.csv",
+  "stats_csv": "/Users/raily/Desktop/hotel_pricing/ABM_hotel_pricing/experiments/experiment2_ablation_comparison/artifacts/results/experiment2_stats.csv"
+}
