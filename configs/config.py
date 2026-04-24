@@ -253,7 +253,7 @@ class RLConfig:
     
     # ========== 奖励函数参数 ==========
     reward_hotel_ratio: float = 0  # 个体收益权重（α）
-    reward_ota_ratio: float = 1
+    reward_ota_ratio: float = 0  # OTA补贴权重（β）
     # ratio = 1 为完全自私
     # ratio = 0 为完全利他
     
@@ -273,7 +273,7 @@ class RLConfig:
     
     # ========== 博弈系统参数 ==========
     enable_game_mode: bool = False  # 是否启用酒店-OTA博弈模式
-    commission_rate: float = 0.30  # OTA佣金率（15%）
+    commission_rate: float = 0.20  # OTA佣金率（20%）
     subsidy_ratio_min: float = 0.0  # OTA补贴比例最小值（0%，不补贴）
     subsidy_ratio_max: float = 0.8  # OTA补贴比例最大值（80%，最多补贴佣金的80%）
     ota_delta_max: float = 15.0  # OTA目标价差上限（元）

@@ -23,7 +23,7 @@ def main():
     parser = argparse.ArgumentParser(description='训练酒店-OTA博弈系统')
     parser.add_argument('--data', type=str, default='datasets/hotel_bookings.csv',
                        help='酒店预订数据文件路径')
-    parser.add_argument('--episodes', type=int, default=250, help='训练轮数')
+    parser.add_argument('--episodes', type=int, default=200, help='训练轮数')
     parser.add_argument('--mode', type=str, default='simultaneous', 
                        choices=['fixed_ota', 'alternating', 'simultaneous'],
                        help='训练模式')

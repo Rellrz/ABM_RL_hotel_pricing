@@ -59,7 +59,7 @@ class PPOBucketEnv(gym.Env):
         stage_actions = self._decode_action(action)
         day_result = self.sim.step_day(stage_actions)
         obs = self.sim.get_obs_vector_for_ppo()
-        reward = float(day_result.reward_hotel)
+        reward = float(day_result.reward_hotel) / float(max(1.0, self.config.ppo_reward_scale))
         terminated = bool(day_result.done)
         truncated = False
         return obs, reward, terminated, truncated, day_result.info

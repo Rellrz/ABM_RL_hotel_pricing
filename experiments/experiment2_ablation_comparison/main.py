@@ -86,14 +86,81 @@ def main() -> None:
     train_df.to_csv(config.training_csv_path, index=False)
     eval_df.to_csv(config.evaluation_csv_path, index=False)
 
-    perf_df = build_performance_table(train_df, eval_df)
-    perf_df.to_csv(config.performance_table_csv, index=False)
+    perf_hotel_df = build_performance_table(
+        train_df,
+        eval_df,
+        training_metric_col="EpisodeHotelRevenue",
+        eval_metric_col="EvalHotelRevenue",
+        metric_name="Hotel Revenue",
+    )
+    perf_hotel_df.to_csv(config.performance_table_hotel_csv, index=False)
+    perf_ota_df = build_performance_table(
+        train_df,
+        eval_df,
+        training_metric_col="EpisodeOTAProfit",
+        eval_metric_col="EvalOTAProfit",
+        metric_name="OTA Profit",
+    )
+    perf_ota_df.to_csv(config.performance_table_ota_csv, index=False)
+    perf_system_df = build_performance_table(
+        train_df,
+        eval_df,
+        training_metric_col="EpisodeSystemProfit",
+        eval_metric_col="EvalSystemProfit",
+        metric_name="System Profit",
+    )
+    perf_system_df.to_csv(config.performance_table_system_csv, index=False)
 
-    stats_df = significance_tests(eval_df)
-    stats_df.to_csv(config.stats_csv_path, index=False)
+    stats_hotel_df = significance_tests(eval_df, eval_metric_col="EvalHotelRevenue")
+    stats_hotel_df.to_csv(config.stats_hotel_csv_path, index=False)
+    stats_ota_df = significance_tests(eval_df, eval_metric_col="EvalOTAProfit")
+    stats_ota_df.to_csv(config.stats_ota_csv_path, index=False)
+    stats_system_df = significance_tests(eval_df, eval_metric_col="EvalSystemProfit")
+    stats_system_df.to_csv(config.stats_system_csv_path, index=False)
 
-    plot_learning_curves(config, train_df)
-    plot_post_eval_bar(config, eval_df)
+    plot_learning_curves(
+        config,
+        train_df,
+        metric_col="EpisodeHotelRevenue",
+        ylabel="Episode Hotel Revenue",
+        output_path=config.learning_curve_hotel_pdf,
+    )
+    plot_learning_curves(
+        config,
+        train_df,
+        metric_col="EpisodeOTAProfit",
+        ylabel="Episode OTA Profit",
+        output_path=config.learning_curve_ota_pdf,
+    )
+    plot_learning_curves(
+        config,
+        train_df,
+        metric_col="EpisodeSystemProfit",
+        ylabel="Episode System Profit",
+        output_path=config.learning_curve_system_pdf,
+    )
+
+    plot_post_eval_bar(
+        config,
+        eval_df,
+        metric_col="EvalHotelRevenue",
+        ylabel="Post-Training Evaluation Hotel Revenue",
+        output_path=config.eval_bar_hotel_pdf,
+    )
+    plot_post_eval_bar(
+        config,
+        eval_df,
+        metric_col="EvalOTAProfit",
+        ylabel="Post-Training Evaluation OTA Profit",
+        output_path=config.eval_bar_ota_pdf,
+    )
+    plot_post_eval_bar(
+        config,
+        eval_df,
+        metric_col="EvalSystemProfit",
+        ylabel="Post-Training Evaluation System Profit",
+        output_path=config.eval_bar_system_pdf,
+    )
 
     summary = {
         "mode": config.run_mode,
@@ -102,10 +169,18 @@ def main() -> None:
         "algorithms": sorted(train_df["Algorithm"].unique().tolist()) if len(train_df) > 0 else [],
         "training_csv": str(config.training_csv_path),
         "evaluation_csv": str(config.evaluation_csv_path),
-        "learning_curve_pdf": str(config.learning_curve_pdf),
-        "eval_bar_pdf": str(config.eval_bar_pdf),
-        "performance_table_csv": str(config.performance_table_csv),
-        "stats_csv": str(config.stats_csv_path),
+        "learning_curve_hotel_pdf": str(config.learning_curve_hotel_pdf),
+        "learning_curve_ota_pdf": str(config.learning_curve_ota_pdf),
+        "learning_curve_system_pdf": str(config.learning_curve_system_pdf),
+        "eval_bar_hotel_pdf": str(config.eval_bar_hotel_pdf),
+        "eval_bar_ota_pdf": str(config.eval_bar_ota_pdf),
+        "eval_bar_system_pdf": str(config.eval_bar_system_pdf),
+        "performance_table_hotel_csv": str(config.performance_table_hotel_csv),
+        "performance_table_ota_csv": str(config.performance_table_ota_csv),
+        "performance_table_system_csv": str(config.performance_table_system_csv),
+        "stats_hotel_csv": str(config.stats_hotel_csv_path),
+        "stats_ota_csv": str(config.stats_ota_csv_path),
+        "stats_system_csv": str(config.stats_system_csv_path),
     }
     with open(config.summary_json_path, "w", encoding="utf-8") as f:
         json.dump(summary, f, ensure_ascii=False, indent=2)

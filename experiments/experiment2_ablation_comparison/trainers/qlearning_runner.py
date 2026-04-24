@@ -64,7 +64,8 @@ def _run_single_seed(
     steps = 0
     done = False
     episode_idx = 0
-    episode_revenue = 0.0
+    episode_hotel_revenue = 0.0
+    episode_ota_profit = 0.0
     pbar = tqdm(
         total=config.train_steps,
         desc=f"Q Seed {seed}",
@@ -94,7 +95,8 @@ def _run_single_seed(
             stage_actions.append((float(a[0]), float(a[1])))
 
         out = sim.step_day(stage_actions)
-        episode_revenue += float(out.reward_hotel)
+        episode_hotel_revenue += float(out.reward_hotel)
+        episode_ota_profit += float(out.reward_ota)
         update_events = out.info.get("update_events", [])
         for ev in update_events:
             s = state_to_144(ev.state, int(ev.state.get("stage_id", 0)))
@@ -116,10 +118,14 @@ def _run_single_seed(
                     "Algorithm": "Q-learning",
                     "Seed": seed,
                     "Episode": episode_idx,
-                    "EpisodeRevenue": float(episode_revenue),
+                    "EpisodeHotelRevenue": float(episode_hotel_revenue),
+                    "EpisodeOTAProfit": float(episode_ota_profit),
+                    "EpisodeSystemProfit": float(episode_hotel_revenue + episode_ota_profit),
+                    "EpisodeRevenue": float(episode_hotel_revenue),
                 }
             )
-            episode_revenue = 0.0
+            episode_hotel_revenue = 0.0
+            episode_ota_profit = 0.0
 
         pbar.set_postfix({"ep": episode_idx, "day": sim.day})
 
@@ -144,7 +150,10 @@ def _run_single_seed(
                 "Algorithm": "Q-learning",
                 "Seed": seed,
                 "EvalEpisode": idx,
-                "EvalRevenue": float(rew),
+                "EvalHotelRevenue": float(rew["EvalHotelRevenue"]),
+                "EvalOTAProfit": float(rew["EvalOTAProfit"]),
+                "EvalSystemProfit": float(rew["EvalSystemProfit"]),
+                "EvalRevenue": float(rew["EvalHotelRevenue"]),
             }
         )
     return train_records, eval_records, seed

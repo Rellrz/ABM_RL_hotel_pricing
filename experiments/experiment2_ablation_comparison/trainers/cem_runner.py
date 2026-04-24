@@ -32,7 +32,7 @@ def _run_single_seed_multivariate(
         initial_std=config.cem_initial_std,
         min_std=config.cem_min_std,
         std_decay=config.cem_std_decay,
-        memory_size=400,
+        memory_size=100,
     )
     sim = BucketPricingSimulator(config=config, seed=seed, historical_data=historical_data)
     sim.reset()
@@ -48,7 +48,8 @@ def _run_single_seed_multivariate(
     steps = 0
     done = False
     episode_idx = 0
-    episode_revenue = 0.0
+    episode_hotel_revenue = 0.0
+    episode_ota_profit = 0.0
     pbar = tqdm(
         total=config.train_steps,
         desc=f"MV-CEM Seed {seed}",
@@ -79,7 +80,8 @@ def _run_single_seed_multivariate(
             actions.append((float(act[0]), float(act[1])))
 
         out = sim.step_day(actions)
-        episode_revenue += float(out.reward_hotel)
+        episode_hotel_revenue += float(out.reward_hotel)
+        episode_ota_profit += float(out.reward_ota)
         update_events = out.info.get("update_events", [])
         for ev in update_events:
             s = state_to_144(ev.state, int(ev.state.get("stage_id", 0)))
@@ -97,10 +99,14 @@ def _run_single_seed_multivariate(
                     "Algorithm": "Multivariate CEM",
                     "Seed": seed,
                     "Episode": episode_idx,
-                    "EpisodeRevenue": float(episode_revenue),
+                    "EpisodeHotelRevenue": float(episode_hotel_revenue),
+                    "EpisodeOTAProfit": float(episode_ota_profit),
+                    "EpisodeSystemProfit": float(episode_hotel_revenue + episode_ota_profit),
+                    "EpisodeRevenue": float(episode_hotel_revenue),
                 }
             )
-            episode_revenue = 0.0
+            episode_hotel_revenue = 0.0
+            episode_ota_profit = 0.0
 
         if config.update_frequency > 0 and (sim.day % config.update_frequency == 0):
             cem.end_episode()
@@ -127,7 +133,10 @@ def _run_single_seed_multivariate(
                 "Algorithm": "Multivariate CEM",
                 "Seed": seed,
                 "EvalEpisode": idx,
-                "EvalRevenue": float(rew),
+                "EvalHotelRevenue": float(rew["EvalHotelRevenue"]),
+                "EvalOTAProfit": float(rew["EvalOTAProfit"]),
+                "EvalSystemProfit": float(rew["EvalSystemProfit"]),
+                "EvalRevenue": float(rew["EvalHotelRevenue"]),
             }
         )
     return train_records, eval_records
@@ -154,7 +163,8 @@ def _run_single_seed_independent(
     steps = 0
     done = False
     episode_idx = 0
-    episode_revenue = 0.0
+    episode_hotel_revenue = 0.0
+    episode_ota_profit = 0.0
     pbar = tqdm(
         total=config.train_steps,
         desc=f"IND-CEM Seed {seed}",
@@ -184,7 +194,8 @@ def _run_single_seed_independent(
             actions.append((float(act[0]), float(act[1])))
 
         out = sim.step_day(actions)
-        episode_revenue += float(out.reward_hotel)
+        episode_hotel_revenue += float(out.reward_hotel)
+        episode_ota_profit += float(out.reward_ota)
         update_events = out.info.get("update_events", [])
         for ev in update_events:
             s = state_to_144(ev.state, int(ev.state.get("stage_id", 0)))
@@ -202,10 +213,14 @@ def _run_single_seed_independent(
                     "Algorithm": "Independent CEM",
                     "Seed": seed,
                     "Episode": episode_idx,
-                    "EpisodeRevenue": float(episode_revenue),
+                    "EpisodeHotelRevenue": float(episode_hotel_revenue),
+                    "EpisodeOTAProfit": float(episode_ota_profit),
+                    "EpisodeSystemProfit": float(episode_hotel_revenue + episode_ota_profit),
+                    "EpisodeRevenue": float(episode_hotel_revenue),
                 }
             )
-            episode_revenue = 0.0
+            episode_hotel_revenue = 0.0
+            episode_ota_profit = 0.0
 
         if config.update_frequency > 0 and (sim.day % config.update_frequency == 0):
             agent.end_episode()
@@ -232,7 +247,10 @@ def _run_single_seed_independent(
                 "Algorithm": "Independent CEM",
                 "Seed": seed,
                 "EvalEpisode": idx,
-                "EvalRevenue": float(rew),
+                "EvalHotelRevenue": float(rew["EvalHotelRevenue"]),
+                "EvalOTAProfit": float(rew["EvalOTAProfit"]),
+                "EvalSystemProfit": float(rew["EvalSystemProfit"]),
+                "EvalRevenue": float(rew["EvalHotelRevenue"]),
             }
         )
     return train_records, eval_records

@@ -56,19 +56,30 @@ def _run_single_seed(
     from stable_baselines3.common.callbacks import BaseCallback
 
     class EpisodeRevenueCallback(BaseCallback):
-        def __init__(self):
+        def __init__(self, target_episodes: int):
             super().__init__()
-            self.episode_rewards: List[float] = []
-            self._current_reward = 0.0
+            self.target_episodes = int(target_episodes)
+            self.episode_hotel_rewards: List[float] = []
+            self.episode_ota_profits: List[float] = []
+            self._current_hotel_reward = 0.0
+            self._current_ota_profit = 0.0
 
         def _on_step(self) -> bool:
-            rewards = np.asarray(self.locals.get("rewards", []), dtype=np.float64).reshape(-1)
             dones = np.asarray(self.locals.get("dones", []), dtype=bool).reshape(-1)
-            for reward, done in zip(rewards, dones):
-                self._current_reward += float(reward)
+            infos = self.locals.get("infos", [])
+            for i, done in enumerate(dones):
+                info = infos[i] if i < len(infos) else {}
+                reward_hotel_by_stage = info.get("reward_hotel_by_stage", [])
+                self._current_hotel_reward += float(sum(reward_hotel_by_stage))
+                reward_ota_by_stage = info.get("reward_ota_by_stage", [])
+                self._current_ota_profit += float(sum(reward_ota_by_stage))
                 if bool(done):
-                    self.episode_rewards.append(float(self._current_reward))
-                    self._current_reward = 0.0
+                    self.episode_hotel_rewards.append(float(self._current_hotel_reward))
+                    self.episode_ota_profits.append(float(self._current_ota_profit))
+                    self._current_hotel_reward = 0.0
+                    self._current_ota_profit = 0.0
+            if len(self.episode_hotel_rewards) >= self.target_episodes:
+                return False
             return True
 
     train_records: List[Dict] = []
@@ -82,40 +93,48 @@ def _run_single_seed(
         n_steps=config.ppo_n_steps,
         batch_size=config.ppo_batch_size,
         gamma=config.ppo_gamma,
+        gae_lambda=config.ppo_gae_lambda,
+        ent_coef=config.ppo_ent_coef,
+        clip_range=config.ppo_clip_range,
         policy_kwargs=policy_kwargs,
         seed=seed,
         verbose=0,
     )
 
-    callback = EpisodeRevenueCallback()
-    learned = 0
+    callback = EpisodeRevenueCallback(target_episodes=config.train_episodes)
     pbar = tqdm(
-        total=config.train_steps,
+        total=config.train_episodes,
         desc=f"PPO Seed {seed}",
-        unit="step",
+        unit="ep",
         leave=False,
         disable=not show_progress,
     )
-    while learned < config.train_steps:
-        chunk = min(config.days_per_episode, config.train_steps - learned)
+    while len(callback.episode_hotel_rewards) < config.train_episodes:
+        prev_eps = len(callback.episode_hotel_rewards)
         model.learn(
-            total_timesteps=chunk,
+            total_timesteps=config.ppo_n_steps,
             callback=callback,
             reset_num_timesteps=False,
             progress_bar=False,
         )
-        learned += chunk
-        pbar.update(chunk)
-        pbar.set_postfix({"ep": len(callback.episode_rewards)})
+        curr_eps = len(callback.episode_hotel_rewards)
+        pbar.update(max(0, curr_eps - prev_eps))
+        pbar.set_postfix({"ep": len(callback.episode_hotel_rewards)})
     pbar.close()
 
-    for idx, rew in enumerate(callback.episode_rewards, start=1):
+    for idx, (hotel_rew, ota_profit) in enumerate(
+        zip(callback.episode_hotel_rewards, callback.episode_ota_profits),
+        start=1,
+    ):
         train_records.append(
             {
                 "Algorithm": "PPO",
                 "Seed": seed,
                 "Episode": idx,
-                "EpisodeRevenue": float(rew),
+                "EpisodeHotelRevenue": float(hotel_rew),
+                "EpisodeOTAProfit": float(ota_profit),
+                "EpisodeSystemProfit": float(hotel_rew + ota_profit),
+                "EpisodeRevenue": float(hotel_rew),
             }
         )
 
@@ -132,7 +151,10 @@ def _run_single_seed(
                 "Algorithm": "PPO",
                 "Seed": seed,
                 "EvalEpisode": idx,
-                "EvalRevenue": float(rew),
+                "EvalHotelRevenue": float(rew["EvalHotelRevenue"]),
+                "EvalOTAProfit": float(rew["EvalOTAProfit"]),
+                "EvalSystemProfit": float(rew["EvalSystemProfit"]),
+                "EvalRevenue": float(rew["EvalHotelRevenue"]),
             }
         )
     return train_records, eval_records, seed

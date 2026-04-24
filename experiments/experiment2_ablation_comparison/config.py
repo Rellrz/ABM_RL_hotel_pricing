@@ -68,11 +68,15 @@ class Experiment2Config:
     # -----------------------------
     # PPO参数
     # -----------------------------
-    ppo_learning_rate: float = 3e-4
-    ppo_n_steps: int = 2048
-    ppo_batch_size: int = 256
-    ppo_gamma: float = 0.99
-    ppo_net_arch: tuple = (128, 128)
+    ppo_learning_rate: float = 1e-4
+    ppo_n_steps: int = 365
+    ppo_batch_size: int = 73
+    ppo_gamma: float = 0.995
+    ppo_gae_lambda: float = 0.98
+    ppo_ent_coef: float = 0.01
+    ppo_clip_range: float = 0.2
+    ppo_reward_scale: float = 1e4
+    ppo_net_arch: tuple = (256, 256)
 
     # -----------------------------
     # CEM参数（复用项目配置）
@@ -89,10 +93,18 @@ class Experiment2Config:
     training_csv_path: Path = RESULTS_DIR / "experiment2_training.csv"
     evaluation_csv_path: Path = RESULTS_DIR / "experiment2_post_eval.csv"
     summary_json_path: Path = RESULTS_DIR / "experiment2_summary.json"
-    stats_csv_path: Path = RESULTS_DIR / "experiment2_stats.csv"
-    learning_curve_pdf: Path = FIGURES_DIR / "episode_revenue_curves.pdf"
-    eval_bar_pdf: Path = FIGURES_DIR / "post_eval_bar_with_errorbars.pdf"
-    performance_table_csv: Path = RESULTS_DIR / "performance_table.csv"
+    stats_hotel_csv_path: Path = RESULTS_DIR / "experiment2_stats_hotel.csv"
+    stats_ota_csv_path: Path = RESULTS_DIR / "experiment2_stats_ota.csv"
+    stats_system_csv_path: Path = RESULTS_DIR / "experiment2_stats_system.csv"
+    learning_curve_hotel_pdf: Path = FIGURES_DIR / "episode_revenue_curves_hotel.pdf"
+    learning_curve_ota_pdf: Path = FIGURES_DIR / "episode_profit_curves_ota.pdf"
+    learning_curve_system_pdf: Path = FIGURES_DIR / "episode_total_profit_curves_system.pdf"
+    eval_bar_hotel_pdf: Path = FIGURES_DIR / "post_eval_bar_hotel_with_errorbars.pdf"
+    eval_bar_ota_pdf: Path = FIGURES_DIR / "post_eval_bar_ota_with_errorbars.pdf"
+    eval_bar_system_pdf: Path = FIGURES_DIR / "post_eval_bar_system_with_errorbars.pdf"
+    performance_table_hotel_csv: Path = RESULTS_DIR / "performance_table_hotel.csv"
+    performance_table_ota_csv: Path = RESULTS_DIR / "performance_table_ota.csv"
+    performance_table_system_csv: Path = RESULTS_DIR / "performance_table_system.csv"
 
     def ensure_dirs(self) -> None:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -102,7 +114,7 @@ class Experiment2Config:
     @property
     def mode_profile(self) -> Dict[str, int]:
         profiles = {
-            "debug": {"n_seeds": 5, "train_episodes": 137},
+            "debug": {"n_seeds": 1, "train_episodes": 150},
             "medium": {"n_seeds": 10, "train_episodes": 548},
             "full": {"n_seeds": 30, "train_episodes": 1370},
         }
