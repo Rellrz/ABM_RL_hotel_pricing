@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Dict, Iterable, Tuple
 
 import pandas as pd
+from tqdm import tqdm
 
 from config import Experiment2Config
 from trainers.ppo_trainer import run_ppo_single_seed
@@ -20,6 +21,7 @@ def run_ppo_trial(
     train_episodes: int,
     post_eval_episodes: int,
     stage: str,
+    show_seed_progress: bool = True,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     cfg = deepcopy(base_config)
     cfg.override_train_episodes = int(train_episodes)
@@ -32,11 +34,22 @@ def run_ppo_trial(
     all_train = []
     all_eval = []
     algo_name = f"PPO_TRIAL_{int(trial_id)}"
-    for sd in seeds:
+    seed_list = [int(s) for s in seeds]
+    seed_iter = (
+        tqdm(
+            seed_list,
+            desc=f"[{stage}] trial={int(trial_id)} seeds",
+            unit="seed",
+            leave=False,
+        )
+        if show_seed_progress
+        else seed_list
+    )
+    for sd in seed_iter:
         tr, ev, _ = run_ppo_single_seed(
             config=cfg,
             historical_data=historical_data,
-            seed=int(sd),
+            seed=sd,
             show_progress=False,
             algorithm_name=algo_name,
         )
@@ -50,4 +63,3 @@ def run_ppo_trial(
         all_eval.extend(ev)
 
     return pd.DataFrame(all_train), pd.DataFrame(all_eval)
-

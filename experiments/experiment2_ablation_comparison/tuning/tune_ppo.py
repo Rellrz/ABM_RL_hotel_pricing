@@ -12,6 +12,7 @@ from typing import Dict, List, Tuple
 import optuna
 import pandas as pd
 from optuna.samplers import TPESampler
+from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 EXPERIMENT_DIR = Path(__file__).resolve().parents[1]
@@ -68,11 +69,13 @@ def _run_stage(
     eval_parts: List[pd.DataFrame] = []
     seeds = list(range(1, int(n_seeds) + 1))
 
-    for i in range(int(n_trials)):
+    trial_iter = tqdm(range(int(n_trials)), desc=f"[{stage}] trials", unit="trial")
+    best_so_far: float | None = None
+    for i in trial_iter:
         trial = study.ask()
         params = suggest_ppo_params(trial, bounds=bounds)
         trial_id = int(start_trial_id + i)
-        print(f"[TUNE][{stage}] trial={trial_id} params={params}")
+        tqdm.write(f"[TUNE][{stage}] trial={trial_id} params={params}")
         tr_df, ev_df = run_ppo_trial(
             base_config=base_config,
             historical_data=historical_data,
@@ -82,6 +85,7 @@ def _run_stage(
             train_episodes=train_episodes,
             post_eval_episodes=post_eval_episodes,
             stage=stage,
+            show_seed_progress=True,
         )
         row, metrics = summarize_trial(
             trial_id=trial_id,
@@ -94,7 +98,15 @@ def _run_stage(
         trial_rows.append(row)
         train_parts.append(tr_df)
         eval_parts.append(ev_df)
-        study.tell(trial, float(metrics["Score"]))
+        score = float(metrics["Score"])
+        study.tell(trial, score)
+        best_so_far = score if best_so_far is None else max(best_so_far, score)
+        trial_iter.set_postfix(
+            trial=trial_id,
+            score=f"{score:.3f}",
+            best=f"{best_so_far:.3f}",
+            stable=int(bool(row.get("Stable", False))),
+        )
 
     return (
         pd.DataFrame(trial_rows),
@@ -173,6 +185,7 @@ def main() -> None:
         "ppo_slope_span_ratio": float(config.ppo_slope_span_ratio),
         "ppo_n_steps": int(config.ppo_n_steps),
     }
+    final_bar = tqdm(total=2, desc="[final] validation", unit="run")
     final_baseline_train, final_baseline_eval = run_ppo_trial(
         base_config=config,
         historical_data=historical_data,
@@ -182,7 +195,10 @@ def main() -> None:
         train_episodes=args.final_episodes,
         post_eval_episodes=args.post_eval_episodes,
         stage="final_baseline",
+        show_seed_progress=True,
     )
+    final_bar.update(1)
+    final_bar.set_postfix(last="baseline")
     final_best_train, final_best_eval = run_ppo_trial(
         base_config=config,
         historical_data=historical_data,
@@ -192,7 +208,11 @@ def main() -> None:
         train_episodes=args.final_episodes,
         post_eval_episodes=args.post_eval_episodes,
         stage="final_best",
+        show_seed_progress=True,
     )
+    final_bar.update(1)
+    final_bar.set_postfix(last="best")
+    final_bar.close()
     final_train_df = pd.concat([final_baseline_train, final_best_train], axis=0, ignore_index=True)
     final_eval_df = pd.concat([final_baseline_eval, final_best_eval], axis=0, ignore_index=True)
     full_train_df = pd.concat([train_df, final_train_df], axis=0, ignore_index=True)
@@ -243,4 +263,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
