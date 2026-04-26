@@ -6,6 +6,7 @@ import argparse
 import importlib.util
 import json
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -41,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--final-seeds", type=int, default=5)
     p.add_argument("--post-eval-episodes", type=int, default=30)
     p.add_argument("--sampler-seed", type=int, default=20260425)
+    p.add_argument("--trial-jobs", type=int, default=1, help="coarse/refine 阶段并行trial进程数")
     p.add_argument("--seed-jobs", type=int, default=1, help="每个trial内部并行的seed进程数")
     return p
 
@@ -49,6 +51,39 @@ def load_historical_data() -> pd.DataFrame:
     path = PROJECT_ROOT / "datasets" / "hotel_bookings.csv"
     df = pd.read_csv(path)
     return df[df["hotel"] == "City Hotel"].copy()
+
+
+def _execute_trial_task(
+    stage: str,
+    trial_id: int,
+    base_config: Experiment2Config,
+    historical_data,
+    params: Dict[str, float],
+    seeds: List[int],
+    train_episodes: int,
+    post_eval_episodes: int,
+    seed_n_jobs: int,
+) -> Dict:
+    tr_df, ev_df = run_ppo_trial(
+        base_config=base_config,
+        historical_data=historical_data,
+        trial_id=trial_id,
+        params=params,
+        seeds=seeds,
+        train_episodes=train_episodes,
+        post_eval_episodes=post_eval_episodes,
+        stage=stage,
+        show_seed_progress=False,
+        seed_n_jobs=seed_n_jobs,
+    )
+    row, metrics = summarize_trial(
+        trial_id=trial_id,
+        stage=stage,
+        params=params,
+        training_df=tr_df,
+        eval_df=ev_df,
+    )
+    return {"row": row, "metrics": metrics, "tr_df": tr_df, "ev_df": ev_df}
 
 
 def _run_stage(
@@ -62,6 +97,7 @@ def _run_stage(
     sampler_seed: int,
     start_trial_id: int,
     prior_df: pd.DataFrame | None = None,
+    trial_n_jobs: int = 1,
     seed_n_jobs: int = 1,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     bounds = GLOBAL_BOUNDS if stage == "coarse" else build_refine_bounds(prior_df if prior_df is not None else pd.DataFrame())
@@ -71,45 +107,118 @@ def _run_stage(
     eval_parts: List[pd.DataFrame] = []
     seeds = list(range(1, int(n_seeds) + 1))
 
-    trial_iter = tqdm(range(int(n_trials)), desc=f"[{stage}] trials", unit="trial")
     best_so_far: float | None = None
-    for i in trial_iter:
-        trial = study.ask()
-        params = suggest_ppo_params(trial, bounds=bounds)
-        trial_id = int(start_trial_id + i)
-        tqdm.write(f"[TUNE][{stage}] trial={trial_id} params={params}")
-        tr_df, ev_df = run_ppo_trial(
-            base_config=base_config,
-            historical_data=historical_data,
-            trial_id=trial_id,
-            params=params,
-            seeds=seeds,
-            train_episodes=train_episodes,
-            post_eval_episodes=post_eval_episodes,
-            stage=stage,
-            show_seed_progress=True,
-            seed_n_jobs=seed_n_jobs,
-        )
-        row, metrics = summarize_trial(
-            trial_id=trial_id,
-            stage=stage,
-            params=params,
-            training_df=tr_df,
-            eval_df=ev_df,
-        )
-        row["OptunaTrialNumber"] = int(trial.number)
-        trial_rows.append(row)
-        train_parts.append(tr_df)
-        eval_parts.append(ev_df)
-        score = float(metrics["Score"])
-        study.tell(trial, score)
-        best_so_far = score if best_so_far is None else max(best_so_far, score)
-        trial_iter.set_postfix(
-            trial=trial_id,
-            score=f"{score:.3f}",
-            best=f"{best_so_far:.3f}",
-            stable=int(bool(row.get("Stable", False))),
-        )
+    n_trial_jobs = max(1, int(trial_n_jobs))
+
+    if n_trial_jobs <= 1 or int(n_trials) <= 1:
+        trial_iter = tqdm(range(int(n_trials)), desc=f"[{stage}] trials", unit="trial")
+        for i in trial_iter:
+            trial = study.ask()
+            params = suggest_ppo_params(trial, bounds=bounds)
+            trial_id = int(start_trial_id + i)
+            tqdm.write(f"[TUNE][{stage}] trial={trial_id} params={params}")
+            tr_df, ev_df = run_ppo_trial(
+                base_config=base_config,
+                historical_data=historical_data,
+                trial_id=trial_id,
+                params=params,
+                seeds=seeds,
+                train_episodes=train_episodes,
+                post_eval_episodes=post_eval_episodes,
+                stage=stage,
+                show_seed_progress=True,
+                seed_n_jobs=seed_n_jobs,
+            )
+            row, metrics = summarize_trial(
+                trial_id=trial_id,
+                stage=stage,
+                params=params,
+                training_df=tr_df,
+                eval_df=ev_df,
+            )
+            row["OptunaTrialNumber"] = int(trial.number)
+            trial_rows.append(row)
+            train_parts.append(tr_df)
+            eval_parts.append(ev_df)
+            score = float(metrics["Score"])
+            study.tell(trial, score)
+            best_so_far = score if best_so_far is None else max(best_so_far, score)
+            trial_iter.set_postfix(
+                trial=trial_id,
+                score=f"{score:.3f}",
+                best=f"{best_so_far:.3f}",
+                stable=int(bool(row.get("Stable", False))),
+            )
+    else:
+        max_workers = min(n_trial_jobs, int(n_trials))
+        trial_bar = tqdm(total=int(n_trials), desc=f"[{stage}] trials", unit="trial")
+        with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            in_flight: Dict = {}
+            next_idx = 0
+            while next_idx < int(n_trials) and len(in_flight) < max_workers:
+                trial = study.ask()
+                params = suggest_ppo_params(trial, bounds=bounds)
+                trial_id = int(start_trial_id + next_idx)
+                tqdm.write(f"[TUNE][{stage}] trial={trial_id} params={params}")
+                fut = ex.submit(
+                    _execute_trial_task,
+                    stage,
+                    trial_id,
+                    base_config,
+                    historical_data,
+                    params,
+                    seeds,
+                    train_episodes,
+                    post_eval_episodes,
+                    int(seed_n_jobs),
+                )
+                in_flight[fut] = (trial, trial_id)
+                next_idx += 1
+
+            while in_flight:
+                done_future = next(as_completed(in_flight))
+                trial, trial_id = in_flight.pop(done_future)
+                payload = done_future.result()
+                row = payload["row"]
+                metrics = payload["metrics"]
+                tr_df = payload["tr_df"]
+                ev_df = payload["ev_df"]
+                row["OptunaTrialNumber"] = int(trial.number)
+                trial_rows.append(row)
+                train_parts.append(tr_df)
+                eval_parts.append(ev_df)
+                score = float(metrics["Score"])
+                study.tell(trial, score)
+                best_so_far = score if best_so_far is None else max(best_so_far, score)
+                trial_bar.update(1)
+                trial_bar.set_postfix(
+                    trial=trial_id,
+                    score=f"{score:.3f}",
+                    best=f"{best_so_far:.3f}",
+                    stable=int(bool(row.get("Stable", False))),
+                    running=len(in_flight),
+                )
+
+                if next_idx < int(n_trials):
+                    trial_new = study.ask()
+                    params_new = suggest_ppo_params(trial_new, bounds=bounds)
+                    trial_id_new = int(start_trial_id + next_idx)
+                    tqdm.write(f"[TUNE][{stage}] trial={trial_id_new} params={params_new}")
+                    fut_new = ex.submit(
+                        _execute_trial_task,
+                        stage,
+                        trial_id_new,
+                        base_config,
+                        historical_data,
+                        params_new,
+                        seeds,
+                        train_episodes,
+                        post_eval_episodes,
+                        int(seed_n_jobs),
+                    )
+                    in_flight[fut_new] = (trial_new, trial_id_new)
+                    next_idx += 1
+        trial_bar.close()
 
     return (
         pd.DataFrame(trial_rows),
@@ -139,7 +248,7 @@ def main() -> None:
     print("=" * 72)
     print(
         f"mode={args.mode} coarse={args.coarse_trials} refine={args.refine_trials} "
-        f"seed_jobs={max(1, int(args.seed_jobs))}"
+        f"trial_jobs={max(1, int(args.trial_jobs))} seed_jobs={max(1, int(args.seed_jobs))}"
     )
 
     coarse_trials_df, coarse_train_df, coarse_eval_df = _run_stage(
@@ -153,6 +262,7 @@ def main() -> None:
         sampler_seed=args.sampler_seed,
         start_trial_id=1,
         prior_df=None,
+        trial_n_jobs=args.trial_jobs,
         seed_n_jobs=args.seed_jobs,
     )
     refine_trials_df, refine_train_df, refine_eval_df = _run_stage(
@@ -166,6 +276,7 @@ def main() -> None:
         sampler_seed=args.sampler_seed + 1,
         start_trial_id=1 + args.coarse_trials,
         prior_df=coarse_trials_df,
+        trial_n_jobs=args.trial_jobs,
         seed_n_jobs=args.seed_jobs,
     )
 
