@@ -51,23 +51,49 @@ def evaluate_ppo_model(
     seed: int,
     model,
     n_episodes: int,
+    vec_normalizer=None,
 ) -> List[Dict[str, float]]:
+    import copy
+
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+
     rewards: List[Dict[str, float]] = []
-    env = PPOBucketEnv(config=config, seed=seed, historical_data=historical_data)
     for ep in range(n_episodes):
-        obs, _ = env.reset(seed=seed * 1000 + ep)
+        env_seed = seed * 1000 + ep
+
+        def _make_env():
+            return PPOBucketEnv(config=config, seed=env_seed, historical_data=historical_data)
+
+        base_env = DummyVecEnv([_make_env])
+        if vec_normalizer is not None:
+            eval_env = VecNormalize(
+                base_env,
+                training=False,
+                norm_obs=bool(getattr(vec_normalizer, "norm_obs", True)),
+                norm_reward=False,
+                clip_obs=float(getattr(vec_normalizer, "clip_obs", 10.0)),
+                clip_reward=float(getattr(vec_normalizer, "clip_reward", 10.0)),
+                gamma=float(getattr(vec_normalizer, "gamma", config.ppo_gamma)),
+            )
+            if getattr(vec_normalizer, "obs_rms", None) is not None:
+                eval_env.obs_rms = copy.deepcopy(vec_normalizer.obs_rms)
+        else:
+            eval_env = base_env
+
+        obs = eval_env.reset()
         done = False
         total_hotel = 0.0
         total_ota = 0.0
         while not done:
             action, _ = model.predict(obs, deterministic=True)
-            obs, reward, terminated, truncated, info = env.step(action)
-            del reward
+            obs, rewards_arr, dones, infos = eval_env.step(action)
+            del rewards_arr
+            info = infos[0]
             reward_hotel_by_stage = info.get("reward_hotel_by_stage", [])
             total_hotel += float(sum(reward_hotel_by_stage))
             reward_ota_by_stage = info.get("reward_ota_by_stage", [])
             total_ota += float(sum(reward_ota_by_stage))
-            done = bool(terminated or truncated)
+            done = bool(dones[0])
         rewards.append(
             {
                 "EvalHotelRevenue": float(total_hotel),
@@ -75,4 +101,5 @@ def evaluate_ppo_model(
                 "EvalSystemProfit": float(total_hotel + total_ota),
             }
         )
+        eval_env.close()
     return rewards

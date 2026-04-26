@@ -54,6 +54,7 @@ def _run_single_seed(
 ) -> tuple[List[Dict], List[Dict], int]:
     from stable_baselines3 import PPO
     from stable_baselines3.common.callbacks import BaseCallback
+    from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
     class EpisodeRevenueCallback(BaseCallback):
         def __init__(self, target_episodes: int):
@@ -84,11 +85,22 @@ def _run_single_seed(
 
     train_records: List[Dict] = []
     eval_records: List[Dict] = []
-    env = PPOBucketEnv(config=config, seed=seed, historical_data=historical_data)
+    def _make_env():
+        return PPOBucketEnv(config=config, seed=seed, historical_data=historical_data)
+
+    vec_env = VecNormalize(
+        DummyVecEnv([_make_env]),
+        training=True,
+        norm_obs=bool(config.ppo_norm_obs),
+        norm_reward=bool(config.ppo_norm_reward),
+        clip_obs=float(config.ppo_clip_obs),
+        clip_reward=float(config.ppo_clip_reward),
+        gamma=float(config.ppo_gamma),
+    )
     policy_kwargs = dict(net_arch=list(config.ppo_net_arch))
     model = PPO(
         policy="MlpPolicy",
-        env=env,
+        env=vec_env,
         learning_rate=config.ppo_learning_rate,
         n_steps=config.ppo_n_steps,
         batch_size=config.ppo_batch_size,
@@ -98,7 +110,7 @@ def _run_single_seed(
         clip_range=config.ppo_clip_range,
         policy_kwargs=policy_kwargs,
         seed=seed,
-        verbose=0,
+        verbose=0
     )
 
     callback = EpisodeRevenueCallback(target_episodes=config.train_episodes)
@@ -143,6 +155,7 @@ def _run_single_seed(
         historical_data=historical_data,
         seed=seed + 400_000,
         model=model,
+        vec_normalizer=vec_env,
         n_episodes=config.post_eval_episodes,
     )
     for idx, rew in enumerate(eval_rewards, start=1):
@@ -157,4 +170,5 @@ def _run_single_seed(
                 "EvalRevenue": float(rew["EvalHotelRevenue"]),
             }
         )
+    vec_env.close()
     return train_records, eval_records, seed

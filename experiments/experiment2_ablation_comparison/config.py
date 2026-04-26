@@ -68,13 +68,17 @@ class Experiment2Config:
     # -----------------------------
     # PPO参数
     # -----------------------------
-    ppo_learning_rate: float = 1e-4
+    ppo_learning_rate: float = 3e-4
     ppo_n_steps: int = 365
-    ppo_batch_size: int = 73
+    ppo_batch_size: int = 64
     ppo_gamma: float = 0.995
     ppo_gae_lambda: float = 0.98
-    ppo_ent_coef: float = 0.01
+    ppo_ent_coef: float = 0.04
     ppo_clip_range: float = 0.2
+    ppo_norm_obs: bool = True
+    ppo_norm_reward: bool = True
+    ppo_clip_obs: float = 10.0
+    ppo_clip_reward: float = 10.0
     ppo_reward_scale: float = 1e4
     ppo_net_arch: tuple = (256, 256)
 
@@ -114,9 +118,9 @@ class Experiment2Config:
     @property
     def mode_profile(self) -> Dict[str, int]:
         profiles = {
-            "debug": {"n_seeds": 1, "train_episodes": 150},
-            "medium": {"n_seeds": 10, "train_episodes": 548},
-            "full": {"n_seeds": 30, "train_episodes": 1370},
+            "debug": {"n_seeds": 1, "train_episodes": 600},
+            "medium": {"n_seeds": 10, "train_episodes": 600},
+            "full": {"n_seeds": 30, "train_episodes": 600},
         }
         if self.run_mode not in profiles:
             raise ValueError(f"Unknown run_mode={self.run_mode}")
