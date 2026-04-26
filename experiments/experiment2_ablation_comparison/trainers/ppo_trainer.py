@@ -52,6 +52,7 @@ def _run_single_seed(
     seed: int,
     show_progress: bool = True,
 ) -> tuple[List[Dict], List[Dict], int]:
+    import torch
     from stable_baselines3 import PPO
     from stable_baselines3.common.callbacks import BaseCallback
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
@@ -97,6 +98,16 @@ def _run_single_seed(
         clip_reward=float(config.ppo_clip_reward),
         gamma=float(config.ppo_gamma),
     )
+    requested_device = str(getattr(config, "ppo_device", "auto")).strip().lower()
+    if requested_device == "mps":
+        if not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+            requested_device = "cpu"
+    elif requested_device == "cuda":
+        if not torch.cuda.is_available():
+            requested_device = "cpu"
+    elif requested_device not in {"auto", "cpu"}:
+        requested_device = "auto"
+
     policy_kwargs = dict(net_arch=list(config.ppo_net_arch))
     model = PPO(
         policy="MlpPolicy",
@@ -109,6 +120,7 @@ def _run_single_seed(
         ent_coef=config.ppo_ent_coef,
         clip_range=config.ppo_clip_range,
         policy_kwargs=policy_kwargs,
+        device=requested_device,
         seed=seed,
         verbose=0
     )

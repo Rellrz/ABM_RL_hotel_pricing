@@ -81,6 +81,7 @@ class Experiment2Config:
     ppo_clip_reward: float = 10.0
     ppo_reward_scale: float = 1e4
     ppo_net_arch: tuple = (256, 256)
+    ppo_device: str = "mps"  # 可选: "cpu" / "mps" / "cuda" / "auto"
 
     # -----------------------------
     # CEM参数（复用项目配置）
