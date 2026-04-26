@@ -41,6 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--final-seeds", type=int, default=5)
     p.add_argument("--post-eval-episodes", type=int, default=30)
     p.add_argument("--sampler-seed", type=int, default=20260425)
+    p.add_argument("--seed-jobs", type=int, default=1, help="每个trial内部并行的seed进程数")
     return p
 
 
@@ -61,6 +62,7 @@ def _run_stage(
     sampler_seed: int,
     start_trial_id: int,
     prior_df: pd.DataFrame | None = None,
+    seed_n_jobs: int = 1,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     bounds = GLOBAL_BOUNDS if stage == "coarse" else build_refine_bounds(prior_df if prior_df is not None else pd.DataFrame())
     study = optuna.create_study(direction="maximize", sampler=TPESampler(seed=sampler_seed))
@@ -86,6 +88,7 @@ def _run_stage(
             post_eval_episodes=post_eval_episodes,
             stage=stage,
             show_seed_progress=True,
+            seed_n_jobs=seed_n_jobs,
         )
         row, metrics = summarize_trial(
             trial_id=trial_id,
@@ -134,7 +137,10 @@ def main() -> None:
     print("=" * 72)
     print("实验二：PPO最小调参")
     print("=" * 72)
-    print(f"mode={args.mode} coarse={args.coarse_trials} refine={args.refine_trials}")
+    print(
+        f"mode={args.mode} coarse={args.coarse_trials} refine={args.refine_trials} "
+        f"seed_jobs={max(1, int(args.seed_jobs))}"
+    )
 
     coarse_trials_df, coarse_train_df, coarse_eval_df = _run_stage(
         stage="coarse",
@@ -147,6 +153,7 @@ def main() -> None:
         sampler_seed=args.sampler_seed,
         start_trial_id=1,
         prior_df=None,
+        seed_n_jobs=args.seed_jobs,
     )
     refine_trials_df, refine_train_df, refine_eval_df = _run_stage(
         stage="refine",
@@ -159,6 +166,7 @@ def main() -> None:
         sampler_seed=args.sampler_seed + 1,
         start_trial_id=1 + args.coarse_trials,
         prior_df=coarse_trials_df,
+        seed_n_jobs=args.seed_jobs,
     )
 
     trials_df = pd.concat([coarse_trials_df, refine_trials_df], axis=0, ignore_index=True)
@@ -196,6 +204,7 @@ def main() -> None:
         post_eval_episodes=args.post_eval_episodes,
         stage="final_baseline",
         show_seed_progress=True,
+        seed_n_jobs=args.seed_jobs,
     )
     final_bar.update(1)
     final_bar.set_postfix(last="baseline")
@@ -209,6 +218,7 @@ def main() -> None:
         post_eval_episodes=args.post_eval_episodes,
         stage="final_best",
         show_seed_progress=True,
+        seed_n_jobs=args.seed_jobs,
     )
     final_bar.update(1)
     final_bar.set_postfix(last="best")

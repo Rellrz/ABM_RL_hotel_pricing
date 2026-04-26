@@ -9,6 +9,6 @@ conda run -n abm python experiments/experiment2_ablation_comparison/tuning/tune_
 conda run -n abm python experiments/experiment2_ablation_comparison/tuning/tune_ppo.py \
   --mode debug --coarse-trials 24 --refine-trials 12 \
   --coarse-episodes 300 --refine-episodes 600 --final-episodes 1000 \
-  --coarse-seeds 1 --refine-seeds 3 --final-seeds 5 --post-eval-episodes 30
+  --coarse-seeds 1 --refine-seeds 3 --final-seeds 5 --post-eval-episodes 30 --seed-jobs 5
 
 '''
