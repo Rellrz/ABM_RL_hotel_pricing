@@ -1,5 +1,0 @@
-Algorithm,Mean Post-Eval Hotel Revenue (Seed Avg),Convergence Episode (90% Own Max),Parameter Count (Complexity)
-Independent CEM,5309485.275966229,5.4,144 x (2+2) = 576
-Multivariate CEM,5295322.179341618,5.4,144 x (2+3) = 720
-PPO,4589366.293333334,1.0,Neural Net (auto-count)
-Q-learning,4676421.9229629645,66.6,"144 x 100 = 14,400"

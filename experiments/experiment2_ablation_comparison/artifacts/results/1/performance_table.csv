@@ -1,3 +1,0 @@
-Algorithm,Mean Post-Eval Revenue (Seed Avg),Convergence Episode (90% Own Max),Parameter Count (Complexity)
-Independent CEM,5194310.870221068,5.6,144 x (2+2) = 576
-Multivariate CEM,5224214.021037014,6.0,144 x (2+3) = 720
