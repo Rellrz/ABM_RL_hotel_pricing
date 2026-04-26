@@ -46,11 +46,28 @@ def run_ppo(config: Experiment2Config, historical_data) -> tuple[List[Dict], Lis
     return all_train_records, all_eval_records
 
 
+def run_ppo_single_seed(
+    config: Experiment2Config,
+    historical_data,
+    seed: int,
+    show_progress: bool = True,
+    algorithm_name: str = "PPO",
+) -> tuple[List[Dict], List[Dict], int]:
+    return _run_single_seed(
+        config=config,
+        historical_data=historical_data,
+        seed=seed,
+        show_progress=show_progress,
+        algorithm_name=algorithm_name,
+    )
+
+
 def _run_single_seed(
     config: Experiment2Config,
     historical_data,
     seed: int,
     show_progress: bool = True,
+    algorithm_name: str = "PPO",
 ) -> tuple[List[Dict], List[Dict], int]:
     import torch
     from stable_baselines3 import PPO
@@ -122,6 +139,7 @@ def _run_single_seed(
         ent_coef=config.ppo_ent_coef,
         clip_range=config.ppo_clip_range,
         policy_kwargs=policy_kwargs,
+        use_sde=bool(getattr(config, "ppo_use_sde", False)),
         device=requested_device,
         seed=seed,
         verbose=0
@@ -154,7 +172,7 @@ def _run_single_seed(
     ):
         train_records.append(
             {
-                "Algorithm": "PPO",
+                "Algorithm": algorithm_name,
                 "Seed": seed,
                 "Episode": idx,
                 "EpisodeHotelRevenue": float(hotel_rew),
@@ -175,7 +193,7 @@ def _run_single_seed(
     for idx, rew in enumerate(eval_rewards, start=1):
         eval_records.append(
             {
-                "Algorithm": "PPO",
+                "Algorithm": algorithm_name,
                 "Seed": seed,
                 "EvalEpisode": idx,
                 "EvalHotelRevenue": float(rew["EvalHotelRevenue"]),

@@ -30,7 +30,7 @@ class PPOBucketEnv(gym.Env):
                 config.offline_price_max - config.offline_price_min,
             )
         )
-        self._slope_span = 0.4 * price_span
+        self._slope_span = float(config.ppo_slope_span_ratio) * price_span
         low = np.array(
             [
                 config.online_price_min,

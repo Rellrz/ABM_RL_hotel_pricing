@@ -21,6 +21,8 @@ ARTIFACTS_DIR = THIS_DIR / "artifacts"
 RESULTS_DIR = ARTIFACTS_DIR / "results"
 FIGURES_DIR = ARTIFACTS_DIR / "figures"
 LOGS_DIR = ARTIFACTS_DIR / "logs"
+TUNING_DIR = ARTIFACTS_DIR / "tuning"
+TUNING_FIGURES_DIR = TUNING_DIR / "figures"
 
 
 DEFAULT_BUCKET_SPEC = "0|1|2-3|4-6|7-13|14-29|30-59|60-90"
@@ -33,6 +35,7 @@ class Experiment2Config:
     # -----------------------------
     run_mode: str = "debug"  # debug / medium / full
     post_eval_episodes: int = 30
+    override_train_episodes: int | None = None
     days_per_episode: int = 365
     n_jobs: int = 1
 
@@ -81,7 +84,9 @@ class Experiment2Config:
     ppo_clip_reward: float = 10.0
     ppo_reward_scale: float = 1e4
     ppo_net_arch: tuple = (256, 256)
+    ppo_use_sde: bool = False
     ppo_device: str = "mps"  # 可选: "cpu" / "mps" / "cuda" / "auto"
+    ppo_slope_span_ratio: float = 0.4
 
     # -----------------------------
     # CEM参数（复用项目配置）
@@ -110,11 +115,18 @@ class Experiment2Config:
     performance_table_hotel_csv: Path = RESULTS_DIR / "performance_table_hotel.csv"
     performance_table_ota_csv: Path = RESULTS_DIR / "performance_table_ota.csv"
     performance_table_system_csv: Path = RESULTS_DIR / "performance_table_system.csv"
+    tuning_trials_csv_path: Path = TUNING_DIR / "ppo_trials.csv"
+    tuning_train_csv_path: Path = TUNING_DIR / "ppo_trial_training.csv"
+    tuning_eval_csv_path: Path = TUNING_DIR / "ppo_trial_eval.csv"
+    tuning_best_json_path: Path = TUNING_DIR / "ppo_best_config.json"
+    tuning_summary_json_path: Path = TUNING_DIR / "ppo_tuning_summary.json"
 
     def ensure_dirs(self) -> None:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
         FIGURES_DIR.mkdir(parents=True, exist_ok=True)
         LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        TUNING_DIR.mkdir(parents=True, exist_ok=True)
+        TUNING_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
     @property
     def mode_profile(self) -> Dict[str, int]:
@@ -133,6 +145,8 @@ class Experiment2Config:
 
     @property
     def train_episodes(self) -> int:
+        if self.override_train_episodes is not None:
+            return int(self.override_train_episodes)
         return int(self.mode_profile["train_episodes"])
 
     @property
