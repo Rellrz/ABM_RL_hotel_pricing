@@ -108,6 +108,8 @@ def _run_single_seed(
     elif requested_device not in {"auto", "cpu"}:
         requested_device = "auto"
 
+    print(f"[PPO] Device: {requested_device}")
+    
     policy_kwargs = dict(net_arch=list(config.ppo_net_arch))
     model = PPO(
         policy="MlpPolicy",

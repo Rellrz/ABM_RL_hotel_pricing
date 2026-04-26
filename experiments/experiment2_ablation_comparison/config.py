@@ -119,7 +119,7 @@ class Experiment2Config:
     @property
     def mode_profile(self) -> Dict[str, int]:
         profiles = {
-            "debug": {"n_seeds": 1, "train_episodes": 600},
+            "debug": {"n_seeds": 1, "train_episodes": 1500},
             "medium": {"n_seeds": 10, "train_episodes": 600},
             "full": {"n_seeds": 30, "train_episodes": 600},
         }
