@@ -7,10 +7,10 @@ conda run -n abm python experiments/experiment2_ablation_comparison/tuning/tune_
   --coarse-seeds 1 --refine-seeds 1 --final-seeds 2 --post-eval-episodes 10 \
   --trial-jobs 1 --seed-jobs 1
   
-conda run -n abm python experiments/experiment2_ablation_comparison/tuning/tune_ppo.py \
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \ 
+python experiments/experiment2_ablation_comparison/tuning/tune_ppo.py \
   --mode debug --coarse-trials 24 --refine-trials 12 \
   --coarse-episodes 300 --refine-episodes 600 --final-episodes 1000 \
   --coarse-seeds 1 --refine-seeds 3 --final-seeds 5 --post-eval-episodes 30 \
-  --trial-jobs 4 --seed-jobs 5
-
+  --trial-jobs 6 --seed-jobs 5
 '''
