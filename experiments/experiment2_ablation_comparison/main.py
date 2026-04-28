@@ -16,6 +16,7 @@ from analysis.plotter import plot_learning_curves, plot_post_eval_bar
 from analysis.stats import build_performance_table, significance_tests
 from config import Experiment2Config
 from trainers.cem_runner import run_cem_family
+from trainers.emsrb_trainer import run_emsrb
 from trainers.ppo_trainer import run_ppo
 from trainers.qlearning_runner import run_qlearning
 
@@ -27,6 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-ppo", action="store_true")
     parser.add_argument("--skip-qlearning", action="store_true")
     parser.add_argument("--skip-cem", action="store_true")
+    parser.add_argument("--skip-emsrb", action="store_true")
     return parser
 
 
@@ -57,32 +59,66 @@ def main() -> None:
     training_records = []
     eval_records = []
 
+    if not args.skip_emsrb:
+        print("\n[1/4] 运行 EMSR-b（0训练，直接评估） ...")
+        rec_train, rec_eval = run_emsrb(config, historical_data)
+        training_records.extend(rec_train)
+        eval_records.extend(rec_eval)
+    else:
+        print("\n[1/4] 跳过 EMSR-b（--skip-emsrb）")
+
     if not args.skip_cem:
-        print("\n[1/3] 训练 CEM 系列 ...")
+        print("\n[2/4] 训练 CEM 系列 ...")
         rec_train, rec_eval = run_cem_family(config, historical_data)
         training_records.extend(rec_train)
         eval_records.extend(rec_eval)
     else:
-        print("\n[1/3] 跳过 CEM 系列（--skip-cem）")
+        print("\n[2/4] 跳过 CEM 系列（--skip-cem）")
 
     if not args.skip_qlearning:
-        print("\n[2/3] 训练 Q-learning ...")
+        print("\n[3/4] 训练 Q-learning ...")
         rec_train, rec_eval = run_qlearning(config, historical_data)
         training_records.extend(rec_train)
         eval_records.extend(rec_eval)
     else:
-        print("\n[2/3] 跳过 Q-learning（--skip-qlearning）")
+        print("\n[3/4] 跳过 Q-learning（--skip-qlearning）")
 
     if not args.skip_ppo:
-        print("\n[3/3] 训练 PPO ...")
+        print("\n[4/4] 训练 PPO ...")
         rec_train, rec_eval = run_ppo(config, historical_data)
         training_records.extend(rec_train)
         eval_records.extend(rec_eval)
     else:
-        print("\n[3/3] 跳过 PPO（--skip-ppo）")
+        print("\n[4/4] 跳过 PPO（--skip-ppo）")
 
-    train_df = pd.DataFrame(training_records)
-    eval_df = pd.DataFrame(eval_records)
+    train_columns = [
+        "Algorithm",
+        "Seed",
+        "Episode",
+        "EpisodeHotelRevenue",
+        "EpisodeOTAProfit",
+        "EpisodeSystemProfit",
+        "EpisodeRevenue",
+    ]
+    eval_columns = [
+        "Algorithm",
+        "Seed",
+        "EvalEpisode",
+        "EvalHotelRevenue",
+        "EvalOTAProfit",
+        "EvalSystemProfit",
+        "EvalRevenue",
+    ]
+    train_df = (
+        pd.DataFrame(training_records)
+        if len(training_records) > 0
+        else pd.DataFrame(columns=train_columns)
+    )
+    eval_df = (
+        pd.DataFrame(eval_records)
+        if len(eval_records) > 0
+        else pd.DataFrame(columns=eval_columns)
+    )
     train_df.to_csv(config.training_csv_path, index=False)
     eval_df.to_csv(config.evaluation_csv_path, index=False)
 
@@ -166,7 +202,7 @@ def main() -> None:
         "mode": config.run_mode,
         "n_training_records": int(len(train_df)),
         "n_eval_records": int(len(eval_df)),
-        "algorithms": sorted(train_df["Algorithm"].unique().tolist()) if len(train_df) > 0 else [],
+        "algorithms": sorted(set(train_df["Algorithm"].tolist()) | set(eval_df["Algorithm"].tolist())),
         "training_csv": str(config.training_csv_path),
         "evaluation_csv": str(config.evaluation_csv_path),
         "learning_curve_hotel_pdf": str(config.learning_curve_hotel_pdf),

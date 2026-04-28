@@ -230,7 +230,7 @@ class ABMConfig:
     urgency_weight: float = 20
     noise_std: float = 12.0
     booking_threshold: float = -15
-    customer_type_ratio: Tuple[float, float] = (0.3, 0.7) #(ota_channel, ota and direct channel)
+    customer_type_ratio: Tuple[float, float] = (0.7, 0.3) #(ota_channel, ota and direct channel)
     online_discount_ratio: float = 0.8
     
     regret_coefficient: float = 0.75

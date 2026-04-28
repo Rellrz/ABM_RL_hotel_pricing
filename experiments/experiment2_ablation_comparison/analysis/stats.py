@@ -45,15 +45,18 @@ def build_performance_table(
         # 90% own max 收敛轮次：按每个seed自身训练指标定义
         conv_steps = []
         sub_train = training_df[training_df["Algorithm"] == algo].copy()
-        for _, seed_df in sub_train.groupby("Seed"):
-            seed_df = seed_df.sort_values("Episode")
-            target = 0.9 * float(seed_df[training_metric_col].max())
-            hit = seed_df[seed_df[training_metric_col] >= target]
-            if len(hit) == 0:
-                conv_steps.append(np.nan)
-            else:
-                conv_steps.append(float(hit.iloc[0]["Episode"]))
-        mean_conv = float(np.nanmean(conv_steps))
+        if len(sub_train) > 0:
+            for _, seed_df in sub_train.groupby("Seed"):
+                seed_df = seed_df.sort_values("Episode")
+                target = 0.9 * float(seed_df[training_metric_col].max())
+                hit = seed_df[seed_df[training_metric_col] >= target]
+                if len(hit) == 0:
+                    conv_steps.append(np.nan)
+                else:
+                    conv_steps.append(float(hit.iloc[0]["Episode"]))
+            mean_conv = float(np.nanmean(conv_steps))
+        else:
+            mean_conv = np.nan
 
         if algo == "Multivariate CEM":
             params = "144 x (2+3) = 720"
@@ -61,6 +64,8 @@ def build_performance_table(
             params = "144 x (2+2) = 576"
         elif algo == "Q-learning":
             params = "144 x 100 = 14,400"
+        elif algo == "EMSR-b":
+            params = "Closed-form (no training)"
         else:
             params = "Neural Net (auto-count)"
 
