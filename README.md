@@ -41,6 +41,16 @@ JSON 文件中的状态序号对应上表中的状态编码，例如：
 ```bash
 tensorboard --logdir=outputs/tensorboard_logs
 ```
+如何使用
+
+- 默认（不扰动）：
+  - 不设环境变量，等价于 none
+- 轻度扰动：
+  - ABM_PERTURBATION_TEMPLATE=mild python experiments/experiment2_ablation_comparison/main.py --mode debug
+- 中度扰动：
+  - ABM_PERTURBATION_TEMPLATE=medium python experiments/experiment2_ablation_comparison/main.py --mode debug
+- 压力测试：
+  - ABM_PERTURBATION_TEMPLATE=stress python experiments/experiment2_ablation_comparison/main.py --mode debug
 
 查看训练过程中的：
 - 酒店和OTA的收益曲线

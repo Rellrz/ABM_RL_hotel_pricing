@@ -1,653 +1,79 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""兼容入口：保留旧导入路径 `configs.config`，实际实现已拆分到子模块。"""
 
-import os
-from dataclasses import dataclass, field #自动根据类属性生成构造函数__init__
-from typing import Any, List, Dict, Tuple, Optional
-import pandas as pd
+from .base import DATA_PATH, PROJECT_ROOT
+from .defaults import ABM_PERTURBATION_TEMPLATES, apply_abm_perturbation_template
+from .estimators import (
+    build_empirical_lead_time_distribution,
+    calculate_monthly_arrival_rates,
+    create_abm_config,
+    fit_lead_time_distribution,
+    fit_wtp_distribution,
+)
+from .loader import load_runtime_configs
+from .schema import (
+    ABMConfig,
+    EnvConfig,
+    LogConfig,
+    PathConfig,
+    RLConfig,
+    RandomConfig,
+    SimulationConfig,
+    SystemConfig,
+)
+from .validators import validate_config as _validate_config
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_PATH = os.path.join(PROJECT_ROOT, 'datasets', 'hotel_bookings.csv')
+__all__ = [
+    'PROJECT_ROOT',
+    'DATA_PATH',
+    'PathConfig',
+    'ABMConfig',
+    'RLConfig',
+    'EnvConfig',
+    'SimulationConfig',
+    'RandomConfig',
+    'SystemConfig',
+    'LogConfig',
+    'ABM_PERTURBATION_TEMPLATES',
+    'apply_abm_perturbation_template',
+    'calculate_monthly_arrival_rates',
+    'fit_lead_time_distribution',
+    'build_empirical_lead_time_distribution',
+    'fit_wtp_distribution',
+    'create_abm_config',
+    'PATH_CONFIG',
+    'ABM_CONFIG',
+    'ABM_PERTURBATION_TEMPLATE',
+    'RL_CONFIG',
+    'ENV_CONFIG',
+    'SIMULATION_CONFIG',
+    'RANDOM_CONFIG',
+    'SYSTEM_CONFIG',
+    'LOG_CONFIG',
+    'validate_config',
+]
 
-@dataclass
-class PathConfig:
-    """路径配置"""
-    # 数据路径
-    raw_data_dir: str = os.path.join(PROJECT_ROOT, 'data', 'raw')
-    processed_data_dir: str = os.path.join(PROJECT_ROOT, 'data', 'processed')
-    hotel_bookings_csv: str = os.path.join(PROJECT_ROOT, 'data', 'raw', 'hotel_bookings.csv')
-    
-    # 输出路径
-    models_dir: str = os.path.join(PROJECT_ROOT, 'outputs', 'models')
-    results_dir: str = os.path.join(PROJECT_ROOT, 'outputs', 'results')
-    figures_dir: str = os.path.join(PROJECT_ROOT, 'outputs', 'figures')
-    tensorboard_dir: str = os.path.join(PROJECT_ROOT, 'outputs', 'tensorboard_logs')
-    
-    def __post_init__(self):
-        """创建必要的目录"""
-        for path in [self.raw_data_dir, self.processed_data_dir, 
-                     self.models_dir, self.results_dir, self.figures_dir]:
-            os.makedirs(path, exist_ok=True)
+# 使用更直观的常量切换扰动模板（none / mild / medium / stress）
+ABM_PERTURBATION_TEMPLATE = 'stress'
 
-# =================
-# ABM配置辅助函数
-# =================
-
-# ABM配置辅助函数
-def calculate_monthly_arrival_rates(historical_data: pd.DataFrame) -> Dict[int, float]:
-    """
-    从历史数据计算每月的日均到达率 λ_m
-    
-    Args:
-        historical_data: 历史预订数据
-        
-    Returns:
-        月份 -> 日均到达率的字典
-    """
-    df = historical_data.copy()
-    
-    if 'arrival_date_month' not in df.columns:
-        return {m: 100.0 for m in range(1, 13)}
-    
-    month_map = {
-        'January': 1, 'February': 2, 'March': 3, 'April': 4,
-        'May': 5, 'June': 6, 'July': 7, 'August': 8,
-        'September': 9, 'October': 10, 'November': 11, 'December': 12
-    }
-    
-    # 优先基于“预订发生日”估计到达率，避免直接用入住月份带来的口径偏差
-    if {'arrival_date_year', 'arrival_date_day_of_month', 'lead_time'}.issubset(df.columns):
-        tmp = df.copy()
-        tmp['month_num'] = tmp['arrival_date_month'].map(month_map)
-        tmp = tmp[tmp['month_num'].notna()].copy()
-        tmp['arrival_date'] = pd.to_datetime(
-            dict(
-                year=tmp['arrival_date_year'].astype(int),
-                month=tmp['month_num'].astype(int),
-                day=tmp['arrival_date_day_of_month'].astype(int),
-            ),
-            errors='coerce',
-        )
-        tmp = tmp[tmp['arrival_date'].notna()].copy()
-        tmp['lead_time_clean'] = tmp['lead_time'].fillna(0).astype(int).clip(lower=0)
-        tmp['booking_date'] = tmp['arrival_date'] - pd.to_timedelta(tmp['lead_time_clean'], unit='D')
-        tmp = tmp[tmp['booking_date'].notna()].copy()
-        tmp['booking_month'] = tmp['booking_date'].dt.month
-        tmp['booking_day'] = tmp['booking_date'].dt.date
-
-        daily_counts = tmp.groupby(['booking_month', 'booking_day']).size().reset_index(name='cnt')
-        monthly_rates_series = daily_counts.groupby('booking_month')['cnt'].mean()
-        monthly_counts = monthly_rates_series.to_dict()
-    else:
-        df['month_num'] = df['arrival_date_month'].map(month_map)
-        monthly_counts = (df.groupby('month_num').size() / 30.0).to_dict()
-    
-    monthly_rates = {}
-    for month in range(1, 13):
-        if month in monthly_counts:
-            monthly_rates[month] = float(monthly_counts[month])
-        else:
-            monthly_rates[month] = 100.0
-    
-    return monthly_rates
-
-
-def fit_lead_time_distribution(historical_data: pd.DataFrame) -> Dict[str, float]:
-    """拟合提前期分布（指数分布，作为兜底）"""
-    if 'lead_time' not in historical_data.columns:
-        return {'mean': 104.0}
-
-    lead_times = historical_data['lead_time'].dropna()
-    lead_times = lead_times[lead_times >= 0]
-
-    if len(lead_times) == 0:
-        return {'mean': 104.0}
-
-    return {'mean': float(lead_times.mean())}
-
-
-def build_empirical_lead_time_distribution(
-    historical_data: pd.DataFrame,
-    max_lead_time_days: int = 90,
-) -> Dict[str, Any]:
-
-    lead_times = historical_data['lead_time'].dropna().astype(int)
-    lead_times = lead_times[(lead_times >= 0) & (lead_times <= max_lead_time_days)]
-
-
-    counts = lead_times.value_counts().sort_index()
-    support = list(range(max_lead_time_days + 1))
-    total = float(counts.sum())
-    probabilities = [float(counts.get(d, 0)) / total for d in support]
-
-    prob_sum = float(sum(probabilities))
-    if prob_sum > 0:
-        probabilities = [p / prob_sum for p in probabilities]
-
-    result = {
-        'type': 'empirical',
-        'max_days': max_lead_time_days,
-        'support': support,
-        'probabilities': probabilities,
-    }
-
-    # 条件分布：P(lead_time | season, weekday)，用于提升行为真实性
-    required_cols = {'arrival_date_year', 'arrival_date_month', 'arrival_date_day_of_month', 'lead_time'}
-    if required_cols.issubset(historical_data.columns):
-        df = historical_data.copy()
-        month_map = {
-            'January': 1, 'February': 2, 'March': 3, 'April': 4,
-            'May': 5, 'June': 6, 'July': 7, 'August': 8,
-            'September': 9, 'October': 10, 'November': 11, 'December': 12
-        }
-        df['month_num'] = df['arrival_date_month'].map(month_map)
-        df = df[df['month_num'].notna()].copy()
-        df['arrival_date'] = pd.to_datetime(
-            dict(
-                year=df['arrival_date_year'].astype(int),
-                month=df['month_num'].astype(int),
-                day=df['arrival_date_day_of_month'].astype(int),
-            ),
-            errors='coerce',
-        )
-        df = df[df['arrival_date'].notna()].copy()
-        df['lead_time_clean'] = df['lead_time'].fillna(0).astype(int).clip(lower=0, upper=max_lead_time_days)
-        df['booking_date'] = df['arrival_date'] - pd.to_timedelta(df['lead_time_clean'], unit='D')
-        df = df[df['booking_date'].notna()].copy()
-        df['booking_month'] = df['booking_date'].dt.month
-        df['booking_weekend'] = (df['booking_date'].dt.dayofweek >= 5).astype(int)
-        df['season'] = df['booking_month'].map(
-            lambda m: 0 if m in [11, 12, 1, 2] else (2 if m in [6, 7, 8] else 1)
-        ).astype(int)
-
-        conditional_probabilities: Dict[int, Dict[int, List[float]]] = {0: {}, 1: {}, 2: {}}
-        alpha = 1.0  # Laplace平滑，避免极端零概率
-        for season in [0, 1, 2]:
-            for weekend in [0, 1]:
-                seg = df[(df['season'] == season) & (df['booking_weekend'] == weekend)]
-                counts = seg['lead_time_clean'].value_counts().to_dict()
-                probs = []
-                denom = float(len(seg) + alpha * (max_lead_time_days + 1))
-                for d in support:
-                    probs.append((float(counts.get(d, 0)) + alpha) / denom)
-                conditional_probabilities[season][weekend] = probs
-
-        result['conditional_probabilities'] = conditional_probabilities
-
-    return result
-
-def fit_wtp_distribution(historical_data: pd.DataFrame) -> Dict[str, Any]:
-    """
-    拟合支付意愿分布（正态分布）
-    
-    基于未取消订单的ADR（平均日房价）
-    
-    Args:
-        historical_data: 历史预订数据
-        
-    Returns:
-        分布参数字典
-    """    
-    df = historical_data.copy()
-    if 'is_canceled' in df.columns:
-        df = df[df['is_canceled'] == 0]
-
-    adr_values = df['adr'].dropna()
-    adr_values = adr_values[(adr_values > 0) & (adr_values < 500)]
-
-
-    overall_mean = float(adr_values.mean())
-    overall_std = float(adr_values.std()) if float(adr_values.std()) > 0 else 30.0
-
-    month_map = {
-        'January': 1, 'February': 2, 'March': 3, 'April': 4,
-        'May': 5, 'June': 6, 'July': 7, 'August': 8,
-        'September': 9, 'October': 10, 'November': 11, 'December': 12
-    }
-
-    if 'arrival_date_year' in df.columns and 'arrival_date_month' in df.columns and 'arrival_date_day_of_month' in df.columns:
-        df = df.copy()
-        df['month_num'] = df['arrival_date_month'].map(month_map)
-        df['date'] = pd.to_datetime(
-            dict(
-                year=df['arrival_date_year'],
-                month=df['month_num'],
-                day=df['arrival_date_day_of_month'],
-            ),
-            errors='coerce',
-        )
-        df = df[df['date'].notna()].copy()
-
-        df = df[df['adr'].notna()].copy()
-        df = df[(df['adr'] > 0) & (df['adr'] < 500)].copy()
-
-        if len(df) > 0:
-            df['is_weekend'] = (df['date'].dt.dayofweek >= 5).astype(int)
-            df['season'] = df['month_num'].map(lambda m: 0 if m in [11, 12, 1, 2] else (2 if m in [6, 7, 8] else 1)).astype(int)
-
-            by_season_weekday: Dict[int, Dict[int, Dict[str, float]]] = {0: {}, 1: {}, 2: {}}
-            grouped = df.groupby(['season', 'is_weekend'])['adr']
-            for (season, is_weekend), series in grouped:
-                series = series.dropna()
-                series = series[(series > 0) & (series < 500)]
-                if len(series) == 0:
-                    continue
-                m = float(series.mean())
-                s = float(series.std()) if float(series.std()) > 0 else overall_std
-                by_season_weekday[int(season)][int(is_weekend)] = {'mean': m, 'std': s}
-
-            for season in [0, 1, 2]:
-                for is_weekend in [0, 1]:
-                    if is_weekend not in by_season_weekday[season]:
-                        by_season_weekday[season][is_weekend] = {'mean': overall_mean, 'std': overall_std}
-
-            return {
-                'type': 'normal',
-                'mean': overall_mean,
-                'std': overall_std,
-                'overall': {'mean': overall_mean, 'std': overall_std},
-                'by_season_weekday': by_season_weekday,
-            }
-
-    fallback = _default_wtp_params()
-    fallback['mean'] = overall_mean
-    fallback['std'] = overall_std
-    fallback['overall'] = {'mean': overall_mean, 'std': overall_std}
-    for season in [0, 1, 2]:
-        for is_weekend in [0, 1]:
-            fallback['by_season_weekday'][season][is_weekend] = {'mean': overall_mean, 'std': overall_std}
-    return fallback
-
-
-def create_abm_config(data_path:str = None) -> 'ABMConfig':
-    """
-    创建ABM配置（工厂函数）
-    
-    Args:
-        data_path: 历史数据文件路径，如果提供则从数据计算参数
-        
-    Returns:
-        ABMConfig实例
-    """
-    if data_path is not None:
-        historical_data = pd.read_csv(data_path)
-        historical_data = historical_data[historical_data['hotel'] == 'City Hotel'].copy()
-        monthly_arrival_rates = calculate_monthly_arrival_rates(historical_data)
-        lead_time_params = build_empirical_lead_time_distribution(historical_data, max_lead_time_days=90)
-        lead_time_params['mean'] = fit_lead_time_distribution(historical_data)['mean']
-        wtp_params = fit_wtp_distribution(historical_data)
-    else:
-        monthly_arrival_rates = {m: 100.0 for m in range(1, 13)}
-        lead_time_params = {'type': 'exponential', 'mean': 104.0}
-        wtp_params = {'mean': 100.0, 'std': 30.0}
-    
-    cfg = ABMConfig(
-        monthly_arrival_rates=monthly_arrival_rates,
-        lead_time_params=lead_time_params,
-        wtp_params=wtp_params
-    )
-    return cfg
-
-
-@dataclass
-class ABMConfig:
-    """ABM客户行为模型配置"""
-    
-    monthly_arrival_rates: Dict[int, float] = field(default_factory=lambda: {m: 100.0 for m in range(1, 13)})
-    lead_time_params: Dict[str, Any] = field(default_factory=lambda: {'type': 'exponential', 'mean': 104.0})
-    wtp_params: Dict[str, float] = field(default_factory=lambda: {'mean': 100.0, 'std': 30.0})
-    
-    urgency_weight: float = 20
-    noise_std: float = 12.0
-    booking_threshold: float = -15
-    customer_type_ratio: Tuple[float, float] = (0.7, 0.3)  # (online_only, omnichannel)
-    online_discount_ratio: float = 0.95
-    
-    regret_coefficient: float = 0.75
-    commitment_weight: float = 8.0
-    shock_std: float = 15.0
-    
-    beta_base: float = 1.0
-    beta_range: Tuple[float, float] = (0.8, 1.2)
-
-    # 扰动开关与强度（用于ID/OOD实验）
-    enable_perturbation: bool = False
-    perturbation_seed: Optional[int] = None
-
-    # 需求到达扰动：OU(AR1近似) + 跳跃冲击
-    demand_ou_theta: float = 0.15
-    demand_ou_sigma: float = 0.08
-    demand_jump_prob: float = 0.02
-    demand_jump_mean: float = 0.20
-    demand_jump_std: float = 0.10
-    lambda_multiplier_min: float = 0.60
-    lambda_multiplier_max: float = 1.80
-
-    # WTP漂移扰动：均值回复随机过程
-    wtp_ou_theta: float = 0.20
-    wtp_ou_sigma: float = 0.03
-    wtp_multiplier_min: float = 0.80
-    wtp_multiplier_max: float = 1.20
-    wtp_std_multiplier_min: float = 0.90
-    wtp_std_multiplier_max: float = 1.30
-
-    # 渠道偏好扰动：online_only 概率动态扰动
-    channel_pref_ou_theta: float = 0.25
-    channel_pref_ou_sigma: float = 0.04
-    channel_online_only_prob_min: float = 0.10
-    channel_online_only_prob_max: float = 0.90
-
-    # 效用噪声：支持 gumbel / normal / none
-    utility_noise_type: str = 'gumbel'
-    utility_gumbel_beta: float = 0.8
-    utility_normal_std: float = 1.0
-
-
-ABM_PERTURBATION_TEMPLATES: Dict[str, Dict[str, Any]] = {
-    # 轻度扰动：用于从ID平滑过渡到轻OOD
-    'mild': {
-        'enable_perturbation': True,
-        'demand_ou_theta': 0.18,
-        'demand_ou_sigma': 0.04,
-        'demand_jump_prob': 0.01,
-        'demand_jump_mean': 0.10,
-        'demand_jump_std': 0.05,
-        'lambda_multiplier_min': 0.80,
-        'lambda_multiplier_max': 1.30,
-        'wtp_ou_theta': 0.25,
-        'wtp_ou_sigma': 0.015,
-        'wtp_multiplier_min': 0.92,
-        'wtp_multiplier_max': 1.08,
-        'wtp_std_multiplier_min': 0.95,
-        'wtp_std_multiplier_max': 1.15,
-        'channel_pref_ou_theta': 0.30,
-        'channel_pref_ou_sigma': 0.02,
-        'channel_online_only_prob_min': 0.20,
-        'channel_online_only_prob_max': 0.80,
-        'utility_noise_type': 'gumbel',
-        'utility_gumbel_beta': 0.5,
-    },
-    # 中度扰动：建议作为论文主OOD场景
-    'medium': {
-        'enable_perturbation': True,
-        'demand_ou_theta': 0.15,
-        'demand_ou_sigma': 0.08,
-        'demand_jump_prob': 0.02,
-        'demand_jump_mean': 0.20,
-        'demand_jump_std': 0.10,
-        'lambda_multiplier_min': 0.60,
-        'lambda_multiplier_max': 1.80,
-        'wtp_ou_theta': 0.20,
-        'wtp_ou_sigma': 0.03,
-        'wtp_multiplier_min': 0.85,
-        'wtp_multiplier_max': 1.15,
-        'wtp_std_multiplier_min': 0.90,
-        'wtp_std_multiplier_max': 1.25,
-        'channel_pref_ou_theta': 0.25,
-        'channel_pref_ou_sigma': 0.04,
-        'channel_online_only_prob_min': 0.15,
-        'channel_online_only_prob_max': 0.85,
-        'utility_noise_type': 'gumbel',
-        'utility_gumbel_beta': 0.8,
-    },
-    # 强扰动：压力测试场景（极端OOD）
-    'stress': {
-        'enable_perturbation': True,
-        'demand_ou_theta': 0.10,
-        'demand_ou_sigma': 0.14,
-        'demand_jump_prob': 0.05,
-        'demand_jump_mean': 0.30,
-        'demand_jump_std': 0.15,
-        'lambda_multiplier_min': 0.45,
-        'lambda_multiplier_max': 2.20,
-        'wtp_ou_theta': 0.15,
-        'wtp_ou_sigma': 0.05,
-        'wtp_multiplier_min': 0.75,
-        'wtp_multiplier_max': 1.25,
-        'wtp_std_multiplier_min': 0.85,
-        'wtp_std_multiplier_max': 1.35,
-        'channel_pref_ou_theta': 0.20,
-        'channel_pref_ou_sigma': 0.07,
-        'channel_online_only_prob_min': 0.10,
-        'channel_online_only_prob_max': 0.90,
-        'utility_noise_type': 'gumbel',
-        'utility_gumbel_beta': 1.2,
-    },
-}
-
-
-def apply_abm_perturbation_template(cfg: ABMConfig, template_name: str) -> ABMConfig:
-    """
-    将ABM扰动模板应用到配置对象上。
-
-    Args:
-        cfg: ABMConfig实例
-        template_name: none / mild / medium / stress
-    """
-    name = str(template_name).strip().lower()
-    if name in ('', 'none', 'off', 'false', '0'):
-        cfg.enable_perturbation = False
-        return cfg
-
-    if name not in ABM_PERTURBATION_TEMPLATES:
-        valid = ', '.join(['none'] + sorted(ABM_PERTURBATION_TEMPLATES.keys()))
-        raise ValueError(f'Unknown ABM perturbation template: {template_name}. Valid: {valid}')
-
-    template = ABM_PERTURBATION_TEMPLATES[name]
-    for k, v in template.items():
-        setattr(cfg, k, v)
-    return cfg
-
-# =================
-
-@dataclass
-class RLConfig:
-    """强化学习配置（博弈主线，仅支持CEM/CEM-NN）"""
-    # ========== 通用参数 ==========
-    n_states: int = 18
-    initial_std: float = 20.0  # 初始探索标准差
-    min_std: float = 5.0  # 最小探索标准差 - 极小值减少后期波动
-    std_decay: float = 0.999  # 标准差衰减率 - 持续衰减到500轮（0.99）
-    
-    # ========== 奖励函数参数 ==========
-    reward_hotel_ratio: float = 0  # 个体收益权重（α）
-    reward_ota_ratio: float = 0  # OTA补贴权重（β）
-    # ratio = 1 为完全自私
-    # ratio = 0 为完全利他
-    
-    # ========== CEM参数 ==========
-    cem_algorithm: str = 'cem'  # 'cem' (表格版) 或 'cem_nn' (神经网络版)
-    cem_n_samples: int = 100  # CEM每次采样的动作数量
-    cem_elite_frac: float = 0.3  # CEM精英样本比例（top-k）
-    
-    # ========== CEM-NN参数 ==========
-    cem_nn_state_dim: int = 18  # 状态维度
-    cem_nn_learning_rate: float = 0.001  # 学习率
-    cem_nn_batch_size: int = 32  # 批次大小
-    cem_nn_memory_size: int = 1000  # 经验回放大小
-    cem_nn_hidden_dims: list = field(default_factory=lambda: [64, 64])  # 隐藏层维度
-    cem_nn_min_std: float = 0.02  # 最小标准差（降低以减少补贴波动，0.02/0.8=2.5%相对标准差）
-    cem_nn_initial_std: float = 0.1  # 初始标准差（从较小的值开始）
-    
-    # ========== 博弈系统参数 ==========
-    enable_game_mode: bool = False  # 是否启用酒店-OTA博弈模式
-    commission_rate: float = 0.20  # OTA佣金率（20%）
-    subsidy_ratio_min: float = 0.0  # OTA补贴比例最小值（0%，不补贴）
-    subsidy_ratio_max: float = 0.8  # OTA补贴比例最大值（80%，最多补贴佣金的80%）
-    ota_delta_max: float = 15.0  # OTA目标价差上限（元）
-    ota_decay_lambda: float = 0.05  # lead_time指数衰减系数
-    ota_noise_std: float = 0.05  # 补贴比例高斯扰动标准差
-    ota_seed: int = 42  # OTA启发式随机种子
-    online_price_min: float = 80.0  # 线上基础价格最小值（需覆盖佣金）
-    online_price_max: float = 180.0  # 线上基础价格最大值
-    offline_price_min: float = 80.0  # 线下价格最小值
-    offline_price_max: float = 180.0  # 线下价格最大值
-    game_training_mode: str = 'simultaneous'  # 训练模式：'fixed_ota', 'alternating', 'simultaneous'
-    
-    episodes: int = 250
-    online_learning_days: int = 90
-    update_frequency: int = 7
-    
-    enable_online_learning: bool = False
-
-@dataclass
-class EnvConfig:
-    """酒店环境参数，模拟真实的酒店运营环境"""
-    
-    initial_inventory: int = 200
-    max_inventory: int = 200
-    min_inventory: int = 0
-
-    booking_window_days: int = 91
-
-
-@dataclass
-class SimulationConfig:
-    """系统模拟和评估参数"""
-    
-    default_days: int = 90
-    default_start_date: str = '2017-01-01'
-    evaluation_episodes: int = 10
-    results_path: str = field(default_factory=lambda: os.path.join(PROJECT_ROOT, '04_结果输出', 'simulation_results'))
-
-@dataclass
-class RandomConfig:
-    """控制系统中的随机性，支持固定模式和随机模式"""
-    
-    random_mode: str = 'random'
-    fixed_seed: int = 42
-    description: str = '随机因子控制配置 - 支持固定和随机两种模式'
-
-
-@dataclass
-class SystemConfig:
-    """系统级配置参数，控制硬件使用和全局行为"""
-    
-    use_cuda: bool = False
-    device: str = 'cpu'
-    random_seed: int = 42
-    max_workers: int = 28
-    memory_limit_gb: int = 24
-    enable_gpu_memory_growth: bool = True
-    mixed_precision: bool = False
-    compile_models: bool = False
-    profile_performance: bool = False
-
-
-@dataclass
-class LogConfig:
-    """系统日志和输出配置"""
-    
-    log_level: str = 'INFO'
-    log_file: str = field(default_factory=lambda: os.path.join(PROJECT_ROOT, '06_临时文件', 'hotel_pricing.log'))
-    console_output: bool = True
-    save_intermediate_results: bool = True
-
-
-PATH_CONFIG = PathConfig()
-ABM_CONFIG = create_abm_config(DATA_PATH)
-ABM_PERTURBATION_TEMPLATE = os.getenv('ABM_PERTURBATION_TEMPLATE', 'none')
-ABM_CONFIG = apply_abm_perturbation_template(ABM_CONFIG, ABM_PERTURBATION_TEMPLATE)
-RL_CONFIG = RLConfig()
-ENV_CONFIG = EnvConfig()
-SIMULATION_CONFIG = SimulationConfig()
-RANDOM_CONFIG = RandomConfig()
-SYSTEM_CONFIG = SystemConfig()
-LOG_CONFIG = LogConfig()
+(
+    PATH_CONFIG,
+    ABM_CONFIG,
+    RL_CONFIG,
+    ENV_CONFIG,
+    SIMULATION_CONFIG,
+    RANDOM_CONFIG,
+    SYSTEM_CONFIG,
+    LOG_CONFIG,
+    _runtime_template,
+) = load_runtime_configs(perturbation_template=ABM_PERTURBATION_TEMPLATE)
 
 
 def validate_config() -> bool:
-    """
-    验证配置有效性
-    
-    检查配置文件中的各项参数是否有效，包括路径存在性、参数范围、逻辑一致性等。
-    提供详细的错误信息帮助定位和修复配置问题。
-    
-    Returns:
-        bool: 配置有效返回True，无效返回False
-        
-    验证项目：
-    - 数据文件存在性检查
-    - BNN参数范围验证（输入维度、隐藏层维度等）
-    - RL参数逻辑验证（学习率、折扣因子等）
-    - 路径格式和权限检查
-    - 数值参数范围检查
-    
-    Note:
-        - 打印详细的错误信息便于调试
-        - 检查关键路径的存在性和可访问性
-        - 验证数值参数的合理范围
-        - 提供配置修复建议
-    """
-    # 检查CEM算法选择
-    if RL_CONFIG.cem_algorithm not in ("cem", "cem_nn"):
-        print("错误：cem_algorithm必须为'cem'或'cem_nn'")
-        return False
+    """兼容旧签名：无参验证当前全局配置。"""
+    return _validate_config(RL_CONFIG, ENV_CONFIG)
 
-    if not (0.0 <= RL_CONFIG.cem_elite_frac <= 1.0):
-        print("错误：cem_elite_frac必须在0和1之间")
-        return False
-
-    if RL_CONFIG.cem_n_samples <= 0:
-        print("错误：cem_n_samples必须大于0")
-        return False
-
-    if RL_CONFIG.initial_std <= 0 or RL_CONFIG.min_std <= 0:
-        print("错误：initial_std和min_std必须大于0")
-        return False
-
-    if RL_CONFIG.commission_rate < 0 or RL_CONFIG.commission_rate > 1:
-        print("错误：commission_rate必须在0和1之间")
-        return False
-
-    if RL_CONFIG.subsidy_ratio_min < 0 or RL_CONFIG.subsidy_ratio_max > 1:
-        print("错误：补贴比例必须在0和1之间")
-        return False
-
-    if RL_CONFIG.subsidy_ratio_min > RL_CONFIG.subsidy_ratio_max:
-        print("错误：subsidy_ratio_min不能大于subsidy_ratio_max")
-        return False
-
-    if RL_CONFIG.ota_delta_max < 0:
-        print("错误：ota_delta_max不能小于0")
-        return False
-
-    if RL_CONFIG.ota_decay_lambda < 0:
-        print("错误：ota_decay_lambda不能小于0")
-        return False
-
-    if RL_CONFIG.ota_noise_std < 0:
-        print("错误：ota_noise_std不能小于0")
-        return False
-
-    if RL_CONFIG.online_price_min <= 0 or RL_CONFIG.offline_price_min <= 0:
-        print("错误：最低价格必须大于0")
-        return False
-
-    if RL_CONFIG.online_price_min > RL_CONFIG.online_price_max:
-        print("错误：online_price_min不能大于online_price_max")
-        return False
-
-    if RL_CONFIG.offline_price_min > RL_CONFIG.offline_price_max:
-        print("错误：offline_price_min不能大于offline_price_max")
-        return False
-    
-    # 检查环境配置
-    initial_inventory = ENV_CONFIG.initial_inventory
-    
-    if initial_inventory <= 0:
-        print("错误：初始库存必须大于0")
-        return False
-
-    if ENV_CONFIG.booking_window_days <= 0:
-        print("错误：booking_window_days必须大于0")
-        return False
-    
-    return True
-
-# 初始化配置
-# 获取项目根目录，用于构建所有相对路径的基准
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 if not validate_config():
     print("配置验证失败，请检查配置文件")
