@@ -13,7 +13,6 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
-from scipy import stats
 from mesa import Agent, Model
 from mesa.time import RandomActivation
 from mesa.datacollection import DataCollector
@@ -29,7 +28,7 @@ class CustomerProfile:
     target_date: int            # 目标入住日期（仿真日期）
     wtp: float                  # 最高支付意愿（Willingness To Pay）
     price_sensitivity: float    # 价格敏感度系数 β
-    customer_type: str          # 客户类型：'online' 或 'offline'
+    customer_type: str          # 客户分群：'online_only' 或 'omnichannel'
 
 
 @dataclass
@@ -41,7 +40,7 @@ class BookingRecord:
     paid_price: float           # 成交价格
     wtp: float                  # 支付意愿
     price_sensitivity: float    # 价格敏感度
-    customer_type: str          # 客户类型
+    customer_type: str          # 最终成交渠道：'online' 或 'offline'
     is_canceled: bool = False   # 是否已取消
 
 
@@ -79,9 +78,9 @@ class CustomerAgent(Agent):
             
         Returns:
             效用得分
-        """
-        # 经济盈余效用：(WTP - P) * β
-        economic_surplus = (self.profile.wtp*discount_ratio) - price
+x        """
+        # 经济盈余效用：β * (WTP - P)
+        economic_surplus = self.profile.price_sensitivity * ((self.profile.wtp * discount_ratio) - price)
         
         # 紧迫性效用：γ/(L+1)
         # 提前期越短，紧迫性越高
@@ -108,7 +107,7 @@ class CustomerAgent(Agent):
             return False
         
         # 计算效用
-        if self.profile.customer_type == 'online':
+        if self.profile.customer_type == 'online_only':
             online_utility = self.evaluate_booking_utility(online_price, current_day,discount_ratio = self.model.params.online_discount_ratio)
             offline_utility = None
         else:
@@ -118,16 +117,16 @@ class CustomerAgent(Agent):
         if offline_utility is None:
             utility = online_utility
             price = online_price
-            self.profile.customer_type = 'online'
+            chosen_channel = 'online'
         else:
             if online_utility > offline_utility:
                 utility = online_utility
                 price = online_price
-                self.profile.customer_type = 'online'
+                chosen_channel = 'online'
             else:
                 utility = offline_utility
                 price = offline_price
-                self.profile.customer_type = 'offline'
+                chosen_channel = 'offline'
 
         threshold = self.model.params.booking_threshold
         # 做出决策
@@ -140,7 +139,7 @@ class CustomerAgent(Agent):
                 paid_price=price,
                 wtp=self.profile.wtp,
                 price_sensitivity=self.profile.price_sensitivity,
-                customer_type=self.profile.customer_type
+                customer_type=chosen_channel
             )
             return True
         
@@ -321,11 +320,30 @@ class HotelABMModel(Model):
         
         return customers
     
-    def _sample_lead_time(self) -> int:
+    def _sample_lead_time(self, current_day: int) -> int:
         lead_time_params = self.params.lead_time_params
         dist_type = lead_time_params.get('type', 'exponential')
 
         if dist_type == 'empirical':
+            month = (current_day // 30) % 12 + 1
+            if month in [11, 12, 1, 2]:
+                season = 0
+            elif month in [6, 7, 8]:
+                season = 2
+            else:
+                season = 1
+            is_weekend = 1 if (current_day % 7) in [5, 6] else 0
+
+            conditional = lead_time_params.get('conditional_probabilities')
+            if isinstance(conditional, dict):
+                season_map = conditional.get(season)
+                if isinstance(season_map, dict):
+                    probs = season_map.get(is_weekend)
+                    support = lead_time_params.get('support')
+                    if support is not None and probs is not None and len(support) == len(probs) and len(support) > 0:
+                        lead_time = int(np.random.choice(support, p=probs))
+                        return max(0, min(lead_time, self.booking_window_days - 1))
+
             support = lead_time_params.get('support')
             probabilities = lead_time_params.get('probabilities')
             if support is not None and probabilities is not None and len(support) == len(probabilities) and len(support) > 0:
@@ -346,7 +364,7 @@ class HotelABMModel(Model):
         Returns:
             客户特征配置
         """
-        lead_time = self._sample_lead_time()
+        lead_time = self._sample_lead_time(current_day)
         
         # 2. 目标入住日期 T_stay = CurrentDate + L
         target_date = current_day + lead_time
@@ -390,7 +408,7 @@ class HotelABMModel(Model):
         
         # 5. 客户类型（线上/线下）
         # 根据历史数据比例随机分配
-        customer_type = np.random.choice(['online', 'offline'], p=self.params.customer_type_ratio)
+        customer_type = np.random.choice(['online_only', 'omnichannel'], p=self.params.customer_type_ratio)
         
         return CustomerProfile(
             lead_time=lead_time,
@@ -453,14 +471,14 @@ class HotelABMModel(Model):
                     self.booking_history.append(customer.booking_record)
                     
                     # 统计总预订量
-                    if customer.profile.customer_type == 'online':
+                    if customer.booking_record.customer_type == 'online':
                         new_bookings_online += 1
                     else:
                         new_bookings_offline += 1
                     
                     # 统计按day_offset分组的预订信息
                     if 0 <= days_ahead < self.booking_window_days:
-                        if customer.profile.customer_type == 'online':
+                        if customer.booking_record.customer_type == 'online':
                             bookings_by_day_offset[days_ahead]['bookings_online'] += 1
                             bookings_by_day_offset[days_ahead]['revenue_online'] += customer.booking_record.paid_price
                         else:
