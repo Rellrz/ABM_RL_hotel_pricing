@@ -78,7 +78,7 @@ class CustomerAgent(Agent):
             
         Returns:
             效用得分
-x        """
+        """
         # 经济盈余效用：β * (WTP - P)
         economic_surplus = self.profile.price_sensitivity * ((self.profile.wtp * discount_ratio) - price)
         
@@ -87,8 +87,8 @@ x        """
         gamma = self.model.params.urgency_weight
         urgency_utility = gamma / (self.profile.lead_time + 1)
         
-        # 总效用
-        utility = economic_surplus + urgency_utility
+        # 总效用 + 行为噪声（可开关）
+        utility = economic_surplus + urgency_utility + self.model.sample_utility_noise(current_day)
         
         return utility
     
@@ -244,6 +244,7 @@ class HotelABMModel(Model):
         if random_seed is not None:
             np.random.seed(random_seed)
             self.random.seed(random_seed)
+        self.rng = np.random.default_rng(random_seed)
         
         # 存储历史数据
         self.historical_data = historical_data
@@ -259,12 +260,17 @@ class HotelABMModel(Model):
         
         # ✅ 每日可用库存字典（由HotelEnvironment同步）
         from collections import defaultdict
-        self.daily_available_rooms = defaultdict(lambda: self.params.get('max_inventory', 226))
+        self.daily_available_rooms = defaultdict(lambda: 226)
         
         # ✅ 价格窗口（由HotelEnvironment同步）
         self.booking_window_days = int(booking_window_days)
         self.price_window_online = [100.0] * self.booking_window_days
         self.price_window_offline = [120.0] * self.booking_window_days
+
+        # 扰动状态（OU/AR1）
+        self.demand_ou_state = 0.0
+        self.wtp_ou_state = 0.0
+        self.channel_ou_state = 0.0
         
         # 活跃预订记录（未取消且未入住）
         self.active_bookings: List[BookingRecord] = []
@@ -282,6 +288,78 @@ class HotelABMModel(Model):
                 "active_bookings": lambda m: len(m.active_bookings),
             }
         )
+
+    def _calendar_features(self, current_day: int) -> Tuple[int, int, int]:
+        month = (current_day // 30) % 12 + 1
+        if month in [11, 12, 1, 2]:
+            season = 0
+        elif month in [6, 7, 8]:
+            season = 2
+        else:
+            season = 1
+        is_weekend = 1 if (current_day % 7) in [5, 6] else 0
+        return month, season, is_weekend
+
+    def _ou_step(self, x: float, theta: float, sigma: float) -> float:
+        return (1.0 - float(theta)) * float(x) + float(sigma) * float(self.rng.normal())
+
+    def _apply_demand_perturbation(self, lambda_base: float) -> float:
+        if not bool(self.params.enable_perturbation):
+            return max(1e-6, float(lambda_base))
+
+        self.demand_ou_state = self._ou_step(
+            self.demand_ou_state,
+            self.params.demand_ou_theta,
+            self.params.demand_ou_sigma,
+        )
+        jump = 0.0
+        if float(self.rng.random()) < float(self.params.demand_jump_prob):
+            jump = float(self.rng.normal(self.params.demand_jump_mean, self.params.demand_jump_std))
+        multiplier = float(np.exp(self.demand_ou_state + jump))
+        multiplier = float(np.clip(multiplier, self.params.lambda_multiplier_min, self.params.lambda_multiplier_max))
+        return max(1e-6, float(lambda_base) * multiplier)
+
+    def _apply_wtp_perturbation(self, wtp_mean: float, wtp_std: float) -> Tuple[float, float]:
+        if not bool(self.params.enable_perturbation):
+            return float(wtp_mean), float(max(1e-6, wtp_std))
+
+        self.wtp_ou_state = self._ou_step(
+            self.wtp_ou_state,
+            self.params.wtp_ou_theta,
+            self.params.wtp_ou_sigma,
+        )
+        mean_mult = float(np.exp(self.wtp_ou_state))
+        mean_mult = float(np.clip(mean_mult, self.params.wtp_multiplier_min, self.params.wtp_multiplier_max))
+        std_mult = float(np.clip(mean_mult, self.params.wtp_std_multiplier_min, self.params.wtp_std_multiplier_max))
+        return float(wtp_mean) * mean_mult, max(1e-6, float(wtp_std) * std_mult)
+
+    def _apply_channel_online_only_prob(self, base_online_only_prob: float) -> float:
+        p = float(np.clip(base_online_only_prob, 0.0, 1.0))
+        if not bool(self.params.enable_perturbation):
+            return p
+
+        self.channel_ou_state = self._ou_step(
+            self.channel_ou_state,
+            self.params.channel_pref_ou_theta,
+            self.params.channel_pref_ou_sigma,
+        )
+        p = p + self.channel_ou_state
+        p = float(np.clip(p, self.params.channel_online_only_prob_min, self.params.channel_online_only_prob_max))
+        return p
+
+    def sample_utility_noise(self, current_day: int) -> float:
+        del current_day
+        if not bool(self.params.enable_perturbation):
+            return 0.0
+
+        noise_type = str(self.params.utility_noise_type).lower()
+        if noise_type == 'gumbel':
+            beta = max(1e-6, float(self.params.utility_gumbel_beta))
+            return float(self.rng.gumbel(loc=0.0, scale=beta))
+        if noise_type == 'normal':
+            std = max(0.0, float(self.params.utility_normal_std))
+            return float(self.rng.normal(loc=0.0, scale=std))
+        return 0.0
     
     def generate_daily_customers(self, current_day: int) -> List[CustomerAgent]:
         """
@@ -294,17 +372,18 @@ class HotelABMModel(Model):
             客户智能体列表
         """
         # 确定当前月份（简化：假设每月30天）
-        month = (current_day // 30) % 12 + 1
+        month, _, _ = self._calendar_features(current_day)
         
         # 获取该月的到达率 λ_m
         lambda_m = self.params.monthly_arrival_rates.get(month, 100.0)
+        lambda_eff = self._apply_demand_perturbation(lambda_m)
         
         # 从泊松分布采样当日客户数量
-        num_customers = np.random.poisson(lambda_m)
+        num_customers = int(self.rng.poisson(lambda_eff))
         
         # 生成客户
         customers = []
-        for i in range(num_customers):
+        for _ in range(num_customers):
             # 生成唯一ID
             customer_id = self.next_id()
             
@@ -325,14 +404,7 @@ class HotelABMModel(Model):
         dist_type = lead_time_params.get('type', 'exponential')
 
         if dist_type == 'empirical':
-            month = (current_day // 30) % 12 + 1
-            if month in [11, 12, 1, 2]:
-                season = 0
-            elif month in [6, 7, 8]:
-                season = 2
-            else:
-                season = 1
-            is_weekend = 1 if (current_day % 7) in [5, 6] else 0
+            _, season, is_weekend = self._calendar_features(current_day)
 
             conditional = lead_time_params.get('conditional_probabilities')
             if isinstance(conditional, dict):
@@ -341,17 +413,17 @@ class HotelABMModel(Model):
                     probs = season_map.get(is_weekend)
                     support = lead_time_params.get('support')
                     if support is not None and probs is not None and len(support) == len(probs) and len(support) > 0:
-                        lead_time = int(np.random.choice(support, p=probs))
+                        lead_time = int(self.rng.choice(support, p=probs))
                         return max(0, min(lead_time, self.booking_window_days - 1))
 
             support = lead_time_params.get('support')
             probabilities = lead_time_params.get('probabilities')
             if support is not None and probabilities is not None and len(support) == len(probabilities) and len(support) > 0:
-                lead_time = int(np.random.choice(support, p=probabilities))
+                lead_time = int(self.rng.choice(support, p=probabilities))
                 return max(0, min(lead_time, self.booking_window_days - 1))
 
         mean = float(lead_time_params.get('mean', 104.0))
-        lead_time = int(np.random.exponential(mean))
+        lead_time = int(self.rng.exponential(mean))
         return max(0, min(lead_time, self.booking_window_days - 1))
 
     def _generate_customer_profile(self, current_day: int) -> CustomerProfile:
@@ -377,15 +449,7 @@ class HotelABMModel(Model):
 
         by_season_weekday = wtp_params.get('by_season_weekday')
         if isinstance(by_season_weekday, dict):
-            month = (current_day // 30) % 12 + 1
-            if month in [11, 12, 1, 2]:
-                season = 0
-            elif month in [6, 7, 8]:
-                season = 2
-            else:
-                season = 1
-
-            is_weekend = 1 if (current_day % 7) in [5, 6] else 0
+            _, season, is_weekend = self._calendar_features(current_day)
 
             seg = by_season_weekday.get(season) if isinstance(by_season_weekday, dict) else None
             if isinstance(seg, dict):
@@ -396,7 +460,8 @@ class HotelABMModel(Model):
 
         if wtp_std <= 0:
             wtp_std = 30.0
-        wtp = np.random.normal(wtp_mean, wtp_std)
+        wtp_mean, wtp_std = self._apply_wtp_perturbation(wtp_mean, wtp_std)
+        wtp = self.rng.normal(wtp_mean, wtp_std)
         wtp = max(10.0, wtp)  # 确保不低于最低价
         
         # 4. 价格敏感度 β_i
@@ -404,11 +469,16 @@ class HotelABMModel(Model):
         # β_i = β_base + α * log(1 + L_i) + ε
         # 方案2：简单均匀分布（当前使用）
         beta_min, beta_max = self.params.beta_range
-        price_sensitivity = np.random.uniform(beta_min, beta_max)
+        price_sensitivity = float(self.rng.uniform(beta_min, beta_max))
         
         # 5. 客户类型（线上/线下）
         # 根据历史数据比例随机分配
-        customer_type = np.random.choice(['online_only', 'omnichannel'], p=self.params.customer_type_ratio)
+        base_online_only_prob = float(self.params.customer_type_ratio[0])
+        online_only_prob = self._apply_channel_online_only_prob(base_online_only_prob)
+        customer_type = self.rng.choice(
+            ['online_only', 'omnichannel'],
+            p=[online_only_prob, 1.0 - online_only_prob],
+        )
         
         return CustomerProfile(
             lead_time=lead_time,
@@ -433,6 +503,7 @@ class HotelABMModel(Model):
         Returns:
             当日统计数据
         """
+        del max_inventory
         # 生成当日客户
         daily_customers = self.generate_daily_customers(self.current_day)
         

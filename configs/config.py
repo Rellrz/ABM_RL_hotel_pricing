@@ -281,11 +281,12 @@ def create_abm_config(data_path:str = None) -> 'ABMConfig':
         lead_time_params = {'type': 'exponential', 'mean': 104.0}
         wtp_params = {'mean': 100.0, 'std': 30.0}
     
-    return ABMConfig(
+    cfg = ABMConfig(
         monthly_arrival_rates=monthly_arrival_rates,
         lead_time_params=lead_time_params,
         wtp_params=wtp_params
     )
+    return cfg
 
 
 @dataclass
@@ -308,6 +309,134 @@ class ABMConfig:
     
     beta_base: float = 1.0
     beta_range: Tuple[float, float] = (0.8, 1.2)
+
+    # 扰动开关与强度（用于ID/OOD实验）
+    enable_perturbation: bool = False
+    perturbation_seed: Optional[int] = None
+
+    # 需求到达扰动：OU(AR1近似) + 跳跃冲击
+    demand_ou_theta: float = 0.15
+    demand_ou_sigma: float = 0.08
+    demand_jump_prob: float = 0.02
+    demand_jump_mean: float = 0.20
+    demand_jump_std: float = 0.10
+    lambda_multiplier_min: float = 0.60
+    lambda_multiplier_max: float = 1.80
+
+    # WTP漂移扰动：均值回复随机过程
+    wtp_ou_theta: float = 0.20
+    wtp_ou_sigma: float = 0.03
+    wtp_multiplier_min: float = 0.80
+    wtp_multiplier_max: float = 1.20
+    wtp_std_multiplier_min: float = 0.90
+    wtp_std_multiplier_max: float = 1.30
+
+    # 渠道偏好扰动：online_only 概率动态扰动
+    channel_pref_ou_theta: float = 0.25
+    channel_pref_ou_sigma: float = 0.04
+    channel_online_only_prob_min: float = 0.10
+    channel_online_only_prob_max: float = 0.90
+
+    # 效用噪声：支持 gumbel / normal / none
+    utility_noise_type: str = 'gumbel'
+    utility_gumbel_beta: float = 0.8
+    utility_normal_std: float = 1.0
+
+
+ABM_PERTURBATION_TEMPLATES: Dict[str, Dict[str, Any]] = {
+    # 轻度扰动：用于从ID平滑过渡到轻OOD
+    'mild': {
+        'enable_perturbation': True,
+        'demand_ou_theta': 0.18,
+        'demand_ou_sigma': 0.04,
+        'demand_jump_prob': 0.01,
+        'demand_jump_mean': 0.10,
+        'demand_jump_std': 0.05,
+        'lambda_multiplier_min': 0.80,
+        'lambda_multiplier_max': 1.30,
+        'wtp_ou_theta': 0.25,
+        'wtp_ou_sigma': 0.015,
+        'wtp_multiplier_min': 0.92,
+        'wtp_multiplier_max': 1.08,
+        'wtp_std_multiplier_min': 0.95,
+        'wtp_std_multiplier_max': 1.15,
+        'channel_pref_ou_theta': 0.30,
+        'channel_pref_ou_sigma': 0.02,
+        'channel_online_only_prob_min': 0.20,
+        'channel_online_only_prob_max': 0.80,
+        'utility_noise_type': 'gumbel',
+        'utility_gumbel_beta': 0.5,
+    },
+    # 中度扰动：建议作为论文主OOD场景
+    'medium': {
+        'enable_perturbation': True,
+        'demand_ou_theta': 0.15,
+        'demand_ou_sigma': 0.08,
+        'demand_jump_prob': 0.02,
+        'demand_jump_mean': 0.20,
+        'demand_jump_std': 0.10,
+        'lambda_multiplier_min': 0.60,
+        'lambda_multiplier_max': 1.80,
+        'wtp_ou_theta': 0.20,
+        'wtp_ou_sigma': 0.03,
+        'wtp_multiplier_min': 0.85,
+        'wtp_multiplier_max': 1.15,
+        'wtp_std_multiplier_min': 0.90,
+        'wtp_std_multiplier_max': 1.25,
+        'channel_pref_ou_theta': 0.25,
+        'channel_pref_ou_sigma': 0.04,
+        'channel_online_only_prob_min': 0.15,
+        'channel_online_only_prob_max': 0.85,
+        'utility_noise_type': 'gumbel',
+        'utility_gumbel_beta': 0.8,
+    },
+    # 强扰动：压力测试场景（极端OOD）
+    'stress': {
+        'enable_perturbation': True,
+        'demand_ou_theta': 0.10,
+        'demand_ou_sigma': 0.14,
+        'demand_jump_prob': 0.05,
+        'demand_jump_mean': 0.30,
+        'demand_jump_std': 0.15,
+        'lambda_multiplier_min': 0.45,
+        'lambda_multiplier_max': 2.20,
+        'wtp_ou_theta': 0.15,
+        'wtp_ou_sigma': 0.05,
+        'wtp_multiplier_min': 0.75,
+        'wtp_multiplier_max': 1.25,
+        'wtp_std_multiplier_min': 0.85,
+        'wtp_std_multiplier_max': 1.35,
+        'channel_pref_ou_theta': 0.20,
+        'channel_pref_ou_sigma': 0.07,
+        'channel_online_only_prob_min': 0.10,
+        'channel_online_only_prob_max': 0.90,
+        'utility_noise_type': 'gumbel',
+        'utility_gumbel_beta': 1.2,
+    },
+}
+
+
+def apply_abm_perturbation_template(cfg: ABMConfig, template_name: str) -> ABMConfig:
+    """
+    将ABM扰动模板应用到配置对象上。
+
+    Args:
+        cfg: ABMConfig实例
+        template_name: none / mild / medium / stress
+    """
+    name = str(template_name).strip().lower()
+    if name in ('', 'none', 'off', 'false', '0'):
+        cfg.enable_perturbation = False
+        return cfg
+
+    if name not in ABM_PERTURBATION_TEMPLATES:
+        valid = ', '.join(['none'] + sorted(ABM_PERTURBATION_TEMPLATES.keys()))
+        raise ValueError(f'Unknown ABM perturbation template: {template_name}. Valid: {valid}')
+
+    template = ABM_PERTURBATION_TEMPLATES[name]
+    for k, v in template.items():
+        setattr(cfg, k, v)
+    return cfg
 
 # =================
 
@@ -417,6 +546,8 @@ class LogConfig:
 
 PATH_CONFIG = PathConfig()
 ABM_CONFIG = create_abm_config(DATA_PATH)
+ABM_PERTURBATION_TEMPLATE = os.getenv('ABM_PERTURBATION_TEMPLATE', 'none')
+ABM_CONFIG = apply_abm_perturbation_template(ABM_CONFIG, ABM_PERTURBATION_TEMPLATE)
 RL_CONFIG = RLConfig()
 ENV_CONFIG = EnvConfig()
 SIMULATION_CONFIG = SimulationConfig()
