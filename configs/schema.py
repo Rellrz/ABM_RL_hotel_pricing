@@ -29,6 +29,10 @@ class PathConfig:
 class ABMConfig:
     """ABM客户行为模型配置"""
     monthly_arrival_rates: Dict[int, float] = field(default_factory=lambda: {m: 100.0 for m in range(1, 13)})
+    # 到达率按月份与日类型分层：0=工作日，1=节假日（当前用周末代理）
+    arrival_rate_by_month_daytype: Dict[int, Dict[int, float]] = field(
+        default_factory=lambda: {m: {0: 100.0, 1: 100.0} for m in range(1, 13)}
+    )
     lead_time_params: Dict[str, Any] = field(default_factory=lambda: {'type': 'exponential', 'mean': 104.0})
     wtp_params: Dict[str, float] = field(default_factory=lambda: {'mean': 100.0, 'std': 30.0})
 
@@ -164,4 +168,3 @@ class LogConfig:
     log_file: str = field(default_factory=lambda: os.path.join(PROJECT_ROOT, '06_临时文件', 'hotel_pricing.log'))
     console_output: bool = True
     save_intermediate_results: bool = True
-

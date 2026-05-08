@@ -371,12 +371,14 @@ class HotelABMModel(Model):
         Returns:
             客户智能体列表
         """
-        # 确定当前月份（简化：假设每月30天）
-        month, _, _ = self._calendar_features(current_day)
-        
-        # 获取该月的到达率 λ_m
-        lambda_m = self.params.monthly_arrival_rates.get(month, 100.0)
-        lambda_eff = self._apply_demand_perturbation(lambda_m)
+        # 确定当前月份与日类型（工作日/节假日，当前节假日用周末代理）
+        month, _, is_weekend = self._calendar_features(current_day)
+
+        # 优先使用月×日类型到达率；缺失时回退到月度到达率
+        monthly_daytype_rates = getattr(self.params, 'arrival_rate_by_month_daytype', {}) or {}
+        month_rates = monthly_daytype_rates.get(month, {}) if isinstance(monthly_daytype_rates, dict) else {}
+        lambda_base = month_rates.get(is_weekend, self.params.monthly_arrival_rates.get(month, 100.0))
+        lambda_eff = self._apply_demand_perturbation(lambda_base)
         
         # 从泊松分布采样当日客户数量
         num_customers = int(self.rng.poisson(lambda_eff))

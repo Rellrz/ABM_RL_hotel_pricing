@@ -51,6 +51,58 @@ def calculate_monthly_arrival_rates(historical_data: pd.DataFrame) -> Dict[int, 
     return monthly_rates
 
 
+def calculate_arrival_rates_by_month_daytype(historical_data: pd.DataFrame) -> Dict[int, Dict[int, float]]:
+    """
+    按月份 + 日类型估计日均到达率：
+    - daytype=0: 工作日
+    - daytype=1: 节假日（当前使用周末代理）
+    """
+    base_monthly = calculate_monthly_arrival_rates(historical_data)
+    result: Dict[int, Dict[int, float]] = {m: {0: float(base_monthly[m]), 1: float(base_monthly[m])} for m in range(1, 13)}
+
+    df = historical_data.copy()
+    required_cols = {'arrival_date_year', 'arrival_date_month', 'arrival_date_day_of_month', 'lead_time'}
+    if not required_cols.issubset(df.columns):
+        return result
+
+    month_map = {
+        'January': 1, 'February': 2, 'March': 3, 'April': 4,
+        'May': 5, 'June': 6, 'July': 7, 'August': 8,
+        'September': 9, 'October': 10, 'November': 11, 'December': 12
+    }
+    df['month_num'] = df['arrival_date_month'].map(month_map)
+    df = df[df['month_num'].notna()].copy()
+    df['arrival_date'] = pd.to_datetime(
+        dict(
+            year=df['arrival_date_year'].astype(int),
+            month=df['month_num'].astype(int),
+            day=df['arrival_date_day_of_month'].astype(int),
+        ),
+        errors='coerce',
+    )
+    df = df[df['arrival_date'].notna()].copy()
+    df['lead_time_clean'] = df['lead_time'].fillna(0).astype(int).clip(lower=0)
+    df['booking_date'] = df['arrival_date'] - pd.to_timedelta(df['lead_time_clean'], unit='D')
+    df = df[df['booking_date'].notna()].copy()
+    df['booking_month'] = df['booking_date'].dt.month.astype(int)
+    df['is_holiday'] = (df['booking_date'].dt.dayofweek >= 5).astype(int)
+    df['booking_day'] = df['booking_date'].dt.date
+
+    daily = (
+        df.groupby(['booking_month', 'is_holiday', 'booking_day'])
+        .size()
+        .reset_index(name='cnt')
+    )
+    rates = daily.groupby(['booking_month', 'is_holiday'])['cnt'].mean()
+
+    for month in range(1, 13):
+        for daytype in (0, 1):
+            key = (month, daytype)
+            if key in rates.index:
+                result[month][daytype] = float(rates.loc[key])
+    return result
+
+
 def fit_lead_time_distribution(historical_data: pd.DataFrame) -> Dict[str, float]:
     if 'lead_time' not in historical_data.columns:
         return {'mean': 104.0}
@@ -215,17 +267,19 @@ def create_abm_config(data_path: str = None) -> ABMConfig:
         historical_data = pd.read_csv(data_path)
         historical_data = historical_data[historical_data['hotel'] == 'City Hotel'].copy()
         monthly_arrival_rates = calculate_monthly_arrival_rates(historical_data)
+        arrival_rate_by_month_daytype = calculate_arrival_rates_by_month_daytype(historical_data)
         lead_time_params = build_empirical_lead_time_distribution(historical_data, max_lead_time_days=90)
         lead_time_params['mean'] = fit_lead_time_distribution(historical_data)['mean']
         wtp_params = fit_wtp_distribution(historical_data)
     else:
         monthly_arrival_rates = {m: 100.0 for m in range(1, 13)}
+        arrival_rate_by_month_daytype = {m: {0: 100.0, 1: 100.0} for m in range(1, 13)}
         lead_time_params = {'type': 'exponential', 'mean': 104.0}
         wtp_params = {'mean': 100.0, 'std': 30.0}
 
     return ABMConfig(
         monthly_arrival_rates=monthly_arrival_rates,
+        arrival_rate_by_month_daytype=arrival_rate_by_month_daytype,
         lead_time_params=lead_time_params,
         wtp_params=wtp_params,
     )
-
