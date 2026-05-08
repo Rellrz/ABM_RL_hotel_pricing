@@ -86,7 +86,7 @@ class Experiment2Config:
     ppo_net_arch: tuple = (256, 256)
     ppo_use_sde: bool = False
     ppo_device: str = "mps"  # 可选: "cpu" / "mps" / "cuda" / "auto"
-    ppo_slope_span_ratio: float = 0.4
+    ppo_slope_span_ratio: float = 0.4  # 兼容旧配置，当前无先验 PPO 不再使用
 
     # -----------------------------
     # CEM参数（复用项目配置）

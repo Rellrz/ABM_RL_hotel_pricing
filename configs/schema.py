@@ -81,15 +81,15 @@ class ABMConfig:
 class RLConfig:
     """强化学习配置（博弈主线，仅支持CEM/CEM-NN）"""
     n_states: int = 18
-    initial_std: float = 20.0
-    min_std: float = 5.0
+    initial_std: float = 50.0
+    min_std: float = 3.0
     std_decay: float = 0.999
 
     reward_hotel_ratio: float = 0
     reward_ota_ratio: float = 0
 
     cem_algorithm: str = 'cem'
-    cem_n_samples: int = 100
+    cem_n_samples: int = 200
     cem_elite_frac: float = 0.3
 
     cem_nn_state_dim: int = 18
@@ -108,16 +108,17 @@ class RLConfig:
     ota_decay_lambda: float = 0.05
     ota_noise_std: float = 0.05
     ota_seed: int = 42
-    online_price_min: float = 80.0
-    online_price_max: float = 180.0
-    offline_price_min: float = 80.0
-    offline_price_max: float = 180.0
+    online_price_min: float = 60.0
+    online_price_max: float = 160.0
+    offline_price_min: float = 60.0
+    offline_price_max: float = 160.0
     game_training_mode: str = 'simultaneous'
 
     episodes: int = 250
     online_learning_days: int = 90
-    update_frequency: int = 7
-
+    update_frequency: int = 90
+    
+    cem_memory_size: int = 200
     enable_online_learning: bool = False
 
 

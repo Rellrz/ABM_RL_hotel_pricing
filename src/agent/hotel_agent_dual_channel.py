@@ -127,7 +127,8 @@ class HotelAgentDualChannel:
                 elite_frac=elite_frac,
                 initial_std=initial_std,
                 min_std=min_std,
-                std_decay=std_decay
+                std_decay=std_decay,
+                memory_size=RL_CONFIG.cem_memory_size
             )
         
         # OTA补贴历史（用于预测OTA行为）
