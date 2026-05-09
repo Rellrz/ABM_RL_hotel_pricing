@@ -1,4 +1,4 @@
-"""PPO用 Gymnasium 环境（4维结构化动作 -> 分桶动作）。"""
+"""PPO用 Gymnasium 环境（标准化动作，无结构性价格先验）。"""
 
 from __future__ import annotations
 
@@ -21,35 +21,15 @@ class PPOBucketEnv(gym.Env):
         self.sim = BucketPricingSimulator(config=config, seed=seed, historical_data=historical_data)
         self.n_stages = self.sim.n_stages
 
-        # 4维动作:
-        # [base_online, base_offline, slope_early, slope_late]
-        # 其中 slope 会被展开成各分桶的价格调整项。
-        price_span = float(
-            min(
-                config.online_price_max - config.online_price_min,
-                config.offline_price_max - config.offline_price_min,
-            )
-        )
-        self._slope_span = float(config.ppo_slope_span_ratio) * price_span
-        low = np.array(
-            [
-                config.online_price_min,
-                config.offline_price_min,
-                -self._slope_span,
-                -self._slope_span,
-            ],
+        # PPO 始终在标准化动作空间 [-1, 1] 上探索。
+        # 这样初始均值 0 对应真实价格区间中点，而不是价格下界。
+        action_dim = self.n_stages * 2
+        self.action_space = spaces.Box(
+            low=-1.0,
+            high=1.0,
+            shape=(action_dim,),
             dtype=np.float32,
         )
-        high = np.array(
-            [
-                config.online_price_max,
-                config.offline_price_max,
-                self._slope_span,
-                self._slope_span,
-            ],
-            dtype=np.float32,
-        )
-        self.action_space = spaces.Box(low=low, high=high, dtype=np.float32)
 
         obs_dim = config.booking_window_days + 1 + 12 + 2
         self.observation_space = spaces.Box(
@@ -61,34 +41,30 @@ class PPOBucketEnv(gym.Env):
 
     def _decode_action(self, action: np.ndarray):
         arr = np.asarray(action, dtype=np.float64).reshape(-1)
-        if arr.size != 4:
-            raise ValueError(f"Expected 4-dim action, got shape={arr.shape}")
-
-        base_on = float(arr[0])
-        base_off = float(arr[1])
-        slope_early = float(arr[2])
-        slope_late = float(arr[3])
-        gap_off = base_off - base_on
+        expected_dim = self.n_stages * 2
+        if arr.size != expected_dim:
+            raise ValueError(f"Expected {expected_dim}-dim action, got shape={arr.shape}")
 
         stage_actions = []
-        max_off = max(1.0, float(self.config.booking_window_days - 1))
-        for sid, (s, e) in enumerate(self.sim.buckets):
-            del sid
-            center_off = 0.5 * (float(s) + float(e))
-            t = float(center_off / max_off)  # near=0, far=1
-            adj = (1.0 - t) * slope_early + t * slope_late
-            pon = np.clip(
-                base_on + adj,
+        for sid in range(self.n_stages):
+            pon = self._denormalize_price(
+                arr[2 * sid],
                 self.config.online_price_min,
                 self.config.online_price_max,
             )
-            poff = np.clip(
-                pon + gap_off,
+            poff = self._denormalize_price(
+                arr[2 * sid + 1],
                 self.config.offline_price_min,
                 self.config.offline_price_max,
             )
             stage_actions.append((float(pon), float(poff)))
         return stage_actions
+
+    @staticmethod
+    def _denormalize_price(value: float, low: float, high: float) -> float:
+        # 标准化动作 0 -> 价格中点；[-1,1] 均匀覆盖整个价格区间
+        clipped = float(np.clip(value, -1.0, 1.0))
+        return float(low + (clipped + 1.0) * 0.5 * (high - low))
 
     def reset(self, *, seed: Optional[int] = None, options=None) -> Tuple[np.ndarray, dict]:
         del options

@@ -45,6 +45,7 @@ class BucketPricingSimulator:
             initial_inventory=config.initial_inventory,
             historical_data=historical_data,
             booking_window_days=config.booking_window_days,
+            episode_days=config.days_per_episode,
         )
         self.ota = OTASubsidyHeuristic(
             commission_rate=config.commission_rate,
@@ -55,7 +56,9 @@ class BucketPricingSimulator:
             seed=config.ota_seed if config.ota_seed >= 0 else seed,
         )
         self.buckets = parse_buckets(config.decision_buckets, config.booking_window_days)
-        self.bucket_of_offset, self.trigger_offsets = build_bucket_mapping(self.buckets, config.booking_window_days)
+        self.bucket_of_offset, self.entry_offsets, self.exit_offsets = build_bucket_mapping(
+            self.buckets, config.booking_window_days
+        )
         self.day = 0
         self.initialized = False
 
@@ -182,19 +185,15 @@ class BucketPricingSimulator:
 
         update_events: List[UpdateEvent] = []
 
-        # 对齐 game_trainer：先处理trigger offsets（先回传再重决策）
-        for off in self.trigger_offsets:
-            ev = self._build_update_event(off, done_flag=False)
-            if ev is not None:
-                update_events.append(ev)
-            self.acc_bookings_online_by_offset[off] = 0
-            self.acc_bookings_offline_by_offset[off] = 0
-
+        # 在桶的右端点为新进入该桶的cohort重新定价。
+        for off in self.entry_offsets:
             sid = int(self.bucket_of_offset[off])
             st = dict(self.env._get_state_for_day_offset(off))
             st["stage_id"] = sid
             pon, poff = self._price_clipped(stage_actions[sid])
             sr = float(self.ota.get_subsidy(pon, poff, lead_time=off))
+            self.acc_bookings_online_by_offset[off] = 0
+            self.acc_bookings_offline_by_offset[off] = 0
             self.price_online_base_by_offset[off] = pon
             self.price_offline_by_offset[off] = poff
             self.subsidy_ratio_by_offset[off] = sr
@@ -234,6 +233,16 @@ class BucketPricingSimulator:
             self.acc_bookings_offline_by_offset[off] += int(bf)
 
         done = bool(done or self.day >= self.config.days_per_episode)
+
+        # 在桶的左端点结算该cohort完整经历该桶后的累计收益。
+        for off in self.exit_offsets:
+            ev = self._build_update_event(off, done_flag=done)
+            if ev is not None:
+                update_events.append(ev)
+            self.acc_bookings_online_by_offset[off] = 0
+            self.acc_bookings_offline_by_offset[off] = 0
+            self.decision_state_by_offset[off] = None
+
         if done:
             # 对齐 game_trainer：episode结束后flush全部offset累计收益（done=True）
             for off in range(self.config.booking_window_days):

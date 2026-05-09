@@ -32,7 +32,7 @@ def _run_single_seed_multivariate(
         initial_std=config.cem_initial_std,
         min_std=config.cem_min_std,
         std_decay=config.cem_std_decay,
-        memory_size=100,
+        memory_size=config.cem_memory_size,
     )
     sim = BucketPricingSimulator(config=config, seed=seed, historical_data=historical_data)
     sim.reset()

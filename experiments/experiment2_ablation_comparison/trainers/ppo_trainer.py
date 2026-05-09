@@ -127,7 +127,10 @@ def _run_single_seed(
 
     print(f"[PPO] Device: {requested_device}")
     
-    policy_kwargs = dict(net_arch=list(config.ppo_net_arch))
+    policy_kwargs = dict(
+        net_arch=list(config.ppo_net_arch),
+        log_std_init=float(getattr(config, "ppo_log_std_init", -0.2)),
+    )
     model = PPO(
         policy="MlpPolicy",
         env=vec_env,

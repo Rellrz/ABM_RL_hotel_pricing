@@ -36,7 +36,7 @@ class Experiment2Config:
     run_mode: str = "debug"  # debug / medium / full
     post_eval_episodes: int = 30
     override_train_episodes: int | None = None
-    days_per_episode: int = 365
+    days_per_episode: int = 730
     n_jobs: int = 1
 
     # -----------------------------
@@ -72,7 +72,7 @@ class Experiment2Config:
     # PPO参数
     # -----------------------------
     ppo_learning_rate: float = 3e-4
-    ppo_n_steps: int = 365
+    ppo_n_steps: int | None = None
     ppo_batch_size: int = 64
     ppo_gamma: float = 0.995
     ppo_gae_lambda: float = 0.98
@@ -122,6 +122,11 @@ class Experiment2Config:
     tuning_eval_csv_path: Path = TUNING_DIR / "ppo_trial_eval.csv"
     tuning_best_json_path: Path = TUNING_DIR / "ppo_best_config.json"
     tuning_summary_json_path: Path = TUNING_DIR / "ppo_tuning_summary.json"
+
+    def __post_init__(self) -> None:
+        # 默认让PPO rollout长度与episode长度一致，避免跨年episode被中途切成多段更新。
+        if self.ppo_n_steps is None:
+            self.ppo_n_steps = int(self.days_per_episode)
 
     def ensure_dirs(self) -> None:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)

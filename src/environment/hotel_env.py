@@ -74,6 +74,7 @@ class HotelEnvironment:
         cost_per_room: int = 20,
         historical_data: Optional[Any] = None,
         booking_window_days: Optional[int] = None,
+        episode_days: int = 365,
     ):
         
         # 从配置文件读取客房数量，如果没有显式传递参数
@@ -86,6 +87,7 @@ class HotelEnvironment:
         
         # ✅ 预订窗口：客户只能预订未来N天（包括今天）
         self.booking_window_days = int(ENV_CONFIG.booking_window_days if booking_window_days is None else booking_window_days)
+        self.episode_days = int(max(1, episode_days))
         
         # ABM模式配置 - 根据RANDOM_CONFIG决定是否使用随机种子
         abm_random_seed = RANDOM_CONFIG.fixed_seed if RANDOM_CONFIG.random_mode == 'fixed' else None
@@ -417,7 +419,7 @@ class HotelEnvironment:
             
         # 获取新状态
         new_state = self._get_state()
-        done = (self.day >= 365)
+        done = (self.day >= self.episode_days)
             
         # 构建info字典，包含渠道级数据（用于博弈系统）
         info = {

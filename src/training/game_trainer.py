@@ -52,7 +52,8 @@ def train_game_system(historical_data: pd.DataFrame,
                       training_mode: str = 'simultaneous',
                       update_frequency: int = 10,
                       booking_window_days: int = 5,
-                      decision_buckets: str = '') -> Tuple[HotelAgentDualChannel, OTASubsidyHeuristic, List, List, List]:
+                      decision_buckets: str = '',
+                      episode_days: int = 730) -> Tuple[HotelAgentDualChannel, OTASubsidyHeuristic, List, List, List]:
     """
     训练酒店-OTA博弈系统
     
@@ -82,7 +83,8 @@ def train_game_system(historical_data: pd.DataFrame,
     env = HotelEnvironment(
         initial_inventory=ENV_CONFIG.initial_inventory,
         historical_data=historical_data,
-        booking_window_days=booking_window_days
+        booking_window_days=booking_window_days,
+        episode_days=episode_days,
     )
     
     # 创建酒店Agent（18×K）
@@ -152,7 +154,8 @@ def train_game_system(historical_data: pd.DataFrame,
             for off in range(int(s), min(int(e) + 1, booking_window_days)):
                 bucket_of_offset[off] = int(sid)
 
-        trigger_offsets = sorted({int(e) for _, e in buckets if 0 <= int(e) < booking_window_days})
+        entry_offsets = sorted({int(e) for _, e in buckets if 0 <= int(e) < booking_window_days})
+        exit_offsets = sorted({int(s) for s, _ in buckets if 0 <= int(s) < booking_window_days})
 
         train_hotel = training_mode in ('simultaneous', 'fixed_ota') or (training_mode == 'alternating' and episode % 2 == 0)
 
@@ -186,33 +189,9 @@ def train_game_system(historical_data: pd.DataFrame,
                 subsidy_ratio_by_offset[off] = float(sr)
                 decision_state_by_offset[off] = dict(st)
 
-        for day in range(365):
-            for off in trigger_offsets:
-                bo_acc = int(acc_bookings_online_by_offset[off])
-                bf_acc = int(acc_bookings_offline_by_offset[off])
-                if (bo_acc > 0 or bf_acc > 0) and decision_state_by_offset[off] is not None:
-                    pob_prev = float(price_online_base_by_offset[off])
-                    pof_prev = float(price_offline_by_offset[off])
-                    sr_prev = float(subsidy_ratio_by_offset[off])
-
-                    revenue_hotel_acc = bo_acc * pob_prev * (1 - RL_CONFIG.commission_rate) + bf_acc * pof_prev
-                    commission_revenue_acc = bo_acc * pob_prev * RL_CONFIG.commission_rate
-                    subsidy_cost_acc = commission_revenue_acc * sr_prev
-                    profit_ota_acc = commission_revenue_acc - subsidy_cost_acc
-
-                    total_system_profit_acc = revenue_hotel_acc + profit_ota_acc
-                    reward_hotel_acc = RL_CONFIG.reward_hotel_ratio * revenue_hotel_acc + (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit_acc
-
-                    state_for_update = dict(decision_state_by_offset[off])
-                    next_state_for_update = dict(env._get_state_for_day_offset(off))
-                    next_state_for_update['stage_id'] = int(bucket_of_offset[off])
-
-                    if train_hotel:
-                        hotel_agent.update(state_for_update, np.array([pob_prev, pof_prev]), reward_hotel_acc, next_state_for_update, done=False, ota_subsidy=subsidy_cost_acc)
-
-                acc_bookings_online_by_offset[off] = 0
-                acc_bookings_offline_by_offset[off] = 0
-
+        for day in range(episode_days):
+            # 在桶的右端点为新进入该桶的cohort定价。
+            for off in entry_offsets:
                 sid = int(bucket_of_offset[off])
                 st = dict(env._get_state_for_day_offset(off))
                 st['stage_id'] = sid
@@ -229,6 +208,8 @@ def train_game_system(historical_data: pd.DataFrame,
                 else:
                     sr = ota_agent.get_subsidy(pob, pof, lead_time=off)
 
+                acc_bookings_online_by_offset[off] = 0
+                acc_bookings_offline_by_offset[off] = 0
                 price_online_base_by_offset[off] = float(pob)
                 price_offline_by_offset[off] = float(pof)
                 subsidy_ratio_by_offset[off] = float(sr)
@@ -282,6 +263,41 @@ def train_game_system(historical_data: pd.DataFrame,
             total_bookings_offline += total_bookings_offline_day
             total_subsidy += actual_subsidy_amount_day
 
+            # 在桶的左端点结算该cohort完整经历该桶后的累计收益。
+            for off in exit_offsets:
+                bo_acc = int(acc_bookings_online_by_offset[off])
+                bf_acc = int(acc_bookings_offline_by_offset[off])
+                if (bo_acc > 0 or bf_acc > 0) and decision_state_by_offset[off] is not None:
+                    pob_prev = float(price_online_base_by_offset[off])
+                    pof_prev = float(price_offline_by_offset[off])
+                    sr_prev = float(subsidy_ratio_by_offset[off])
+
+                    revenue_hotel_acc = bo_acc * pob_prev * (1 - RL_CONFIG.commission_rate) + bf_acc * pof_prev
+                    commission_revenue_acc = bo_acc * pob_prev * RL_CONFIG.commission_rate
+                    subsidy_cost_acc = commission_revenue_acc * sr_prev
+                    profit_ota_acc = commission_revenue_acc - subsidy_cost_acc
+
+                    total_system_profit_acc = revenue_hotel_acc + profit_ota_acc
+                    reward_hotel_acc = RL_CONFIG.reward_hotel_ratio * revenue_hotel_acc + (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit_acc
+
+                    state_for_update = dict(decision_state_by_offset[off])
+                    next_state_for_update = dict(env._get_state_for_day_offset(off))
+                    next_state_for_update['stage_id'] = int(bucket_of_offset[off])
+
+                    if train_hotel:
+                        hotel_agent.update(
+                            state_for_update,
+                            np.array([pob_prev, pof_prev]),
+                            reward_hotel_acc,
+                            next_state_for_update,
+                            done=bool(done),
+                            ota_subsidy=subsidy_cost_acc,
+                        )
+
+                acc_bookings_online_by_offset[off] = 0
+                acc_bookings_offline_by_offset[off] = 0
+                decision_state_by_offset[off] = None
+
             last_subsidy_ratio = subsidy_ratio_by_offset[0] if subsidy_ratio_by_offset else 0.0
 
             if is_last_episode:
@@ -334,7 +350,7 @@ def train_game_system(historical_data: pd.DataFrame,
             if train_hotel:
                 hotel_agent.update(state_for_update, np.array([pob_prev, pof_prev]), reward_hotel_acc, next_state_for_update, done=True, ota_subsidy=subsidy_cost_acc)
 
-        if update_frequency <= 0 or 365 % update_frequency != 0:
+        if update_frequency <= 0 or episode_days % update_frequency != 0:
             if train_hotel:
                 hotel_agent.end_episode()
         
@@ -356,8 +372,8 @@ def train_game_system(historical_data: pd.DataFrame,
         exploration_rate = hotel_agent.get_epsilon(episode)
         monitor.record_rl_episode(
             episode=episode + 1,
-            avg_reward=total_reward_hotel / 365,
-            episode_length=365,
+            avg_reward=total_reward_hotel / max(1, episode_days),
+            episode_length=episode_days,
             exploration_rate=exploration_rate,
             q_stats=None
         )

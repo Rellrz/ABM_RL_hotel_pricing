@@ -32,13 +32,14 @@ def parse_buckets(spec: str, n: int) -> List[Tuple[int, int]]:
     return buckets
 
 
-def build_bucket_mapping(buckets: List[Tuple[int, int]], window_days: int) -> Tuple[List[int], List[int]]:
+def build_bucket_mapping(buckets: List[Tuple[int, int]], window_days: int) -> Tuple[List[int], List[int], List[int]]:
     bucket_of_offset = [0] * window_days
     for sid, (s, e) in enumerate(buckets):
         for off in range(s, e + 1):
             bucket_of_offset[off] = sid
-    trigger_offsets = sorted({e for _, e in buckets if 0 <= e < window_days})
-    return bucket_of_offset, trigger_offsets
+    entry_offsets = sorted({e for _, e in buckets if 0 <= e < window_days})
+    exit_offsets = sorted({s for s, _ in buckets if 0 <= s < window_days})
+    return bucket_of_offset, entry_offsets, exit_offsets
 
 
 def state_to_144(state: Dict, stage_id: int) -> int:
