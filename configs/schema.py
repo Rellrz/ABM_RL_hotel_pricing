@@ -85,11 +85,11 @@ class RLConfig:
     min_std: float = 3.0
     std_decay: float = 0.999
 
-    reward_hotel_ratio: float = 0
+    reward_hotel_ratio: float = 0.5
     reward_ota_ratio: float = 0
 
     cem_algorithm: str = 'cem'
-    cem_n_samples: int = 200
+    cem_n_samples: int = 400
     cem_elite_frac: float = 0.3
 
     cem_nn_state_dim: int = 18
@@ -118,7 +118,7 @@ class RLConfig:
     online_learning_days: int = 90
     update_frequency: int = 90
     
-    cem_memory_size: int = 200
+    cem_memory_size: int = 400
     enable_online_learning: bool = False
 
 

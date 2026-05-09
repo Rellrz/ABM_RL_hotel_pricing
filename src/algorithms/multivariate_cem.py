@@ -36,7 +36,6 @@ class MultivariateCrossEntropyMethod:
         memory_size: int = 100,
         alpha: float = 0.3,
         cov_reg: float = 1e-5,
-        min_update_samples: int = None,
         diagonal_covariance: bool = False,
     ):
         self.n_states = int(n_states)
@@ -62,11 +61,6 @@ class MultivariateCrossEntropyMethod:
         self.initial_std_vec = np.maximum(init_std_vec, self.min_std)
         self.initial_cov = np.diag(self.initial_std_vec ** 2)
         self.initial_mean = (self.action_mins + self.action_maxs) / 2.0
-        if min_update_samples is None:
-            # 比 n_elite 更严格的稳定更新阈值，减少小样本协方差抖动
-            self.min_update_samples = max(self.n_elite * 2, 20)
-        else:
-            self.min_update_samples = max(int(min_update_samples), self.n_elite)
 
         self.mean_table = defaultdict(lambda: self.initial_mean.copy())
         self.cov_table = defaultdict(lambda: self.initial_cov.copy())
@@ -157,9 +151,6 @@ class MultivariateCrossEntropyMethod:
         return float(reward)
 
     def _update_distribution(self, state_key: Any) -> bool:
-        if len(self.memory[state_key]) < self.min_update_samples:
-            return False
-
         recent = list(self.memory[state_key])[-self.n_samples :]
         if len(recent) < self.n_elite:
             return False
@@ -239,7 +230,9 @@ class MultivariateCrossEntropyMethod:
             "alpha": self.alpha,
             "cov_reg": self.cov_reg,
             "diagonal_covariance": self.diagonal_covariance,
-            "min_update_samples": self.min_update_samples,
+            "memory_size": self.memory_size,
+            "n_samples": self.n_samples,
+            "n_elite": self.n_elite,
             "means": {str(k): v.tolist() for k, v in self.mean_table.items()},
             "covs": {str(k): v.tolist() for k, v in self.cov_table.items()},
             "state_visit_count": {str(k): int(v) for k, v in self.state_visit_count.items()},

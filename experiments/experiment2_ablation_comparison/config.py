@@ -87,6 +87,7 @@ class Experiment2Config:
     ppo_use_sde: bool = False
     ppo_device: str = "mps"  # 可选: "cpu" / "mps" / "cuda" / "auto"
     ppo_slope_span_ratio: float = 0.4  # 兼容旧配置，当前无先验 PPO 不再使用
+    ppo_log_std_init: float = -0.2  # std≈0.82, 让初期在[-1,1]动作空间里充分探索
 
     # -----------------------------
     # CEM参数（复用项目配置）
@@ -96,6 +97,7 @@ class Experiment2Config:
     cem_initial_std: float = float(RL_CONFIG.initial_std)
     cem_min_std: float = float(RL_CONFIG.min_std)
     cem_std_decay: float = float(RL_CONFIG.std_decay)
+    cem_memory_size: int = int(RL_CONFIG.cem_memory_size)
 
     # -----------------------------
     # 路径

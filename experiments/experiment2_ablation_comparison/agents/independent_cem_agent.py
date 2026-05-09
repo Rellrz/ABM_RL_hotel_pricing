@@ -23,7 +23,7 @@ class IndependentCEMAgent:
             initial_std=config.cem_initial_std,
             min_std=config.cem_min_std,
             std_decay=config.cem_std_decay,
-            memory_size=400,
+            memory_size=config.cem_memory_size,
             diagonal_covariance=True,
         )
 
