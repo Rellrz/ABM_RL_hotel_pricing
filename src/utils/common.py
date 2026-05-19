@@ -224,6 +224,66 @@ def build_cem_state_key(state: Dict, stage_id: int | None = None) -> Tuple[int, 
     )
 
 
+def compute_reward_shaping(
+    state: Dict | None,
+    bookings_online: int,
+    bookings_offline: int,
+    price_online_base: float,
+    price_offline: float,
+    online_price_min: float,
+    online_price_max: float,
+    offline_price_min: float,
+    offline_price_max: float,
+    price_weight: float,
+    sellthrough_weight: float,
+) -> Dict[str, float]:
+    """轻量 reward shaping：仅对训练奖励做小幅引导，不改变经济收益口径。"""
+    if state is None or (price_weight <= 0.0 and sellthrough_weight <= 0.0):
+        return {
+            "reward_multiplier": 1.0,
+            "pressure": 0.0,
+            "price_discount": 0.0,
+            "sellthrough": 0.0,
+            "price_penalty": 0.0,
+            "sellthrough_penalty": 0.0,
+            "shaping_penalty": 0.0,
+        }
+
+    norm = enrich_bucket_state(state)
+    bucket_inv_ratio = float(np.clip(norm.get("bucket_inv_ratio", norm.get("inventory_ratio", 1.0)), 0.0, 1.0))
+    near_inv_ratio = float(np.clip(norm.get("near_inv_ratio", bucket_inv_ratio), 0.0, 1.0))
+    far_inv_ratio = float(np.clip(norm.get("far_inv_ratio", bucket_inv_ratio), 0.0, 1.0))
+
+    scarcity = float(np.clip(1.0 - bucket_inv_ratio, 0.0, 1.0))
+    near_tightness = float(np.clip(far_inv_ratio - near_inv_ratio, 0.0, 1.0))
+    pressure = float(np.clip(0.6 * scarcity + 0.4 * near_tightness, 0.0, 1.0))
+
+    on_span = float(max(1e-8, online_price_max - online_price_min))
+    off_span = float(max(1e-8, offline_price_max - offline_price_min))
+    on_pos = float(np.clip((price_online_base - online_price_min) / on_span, 0.0, 1.0))
+    off_pos = float(np.clip((price_offline - offline_price_min) / off_span, 0.0, 1.0))
+    avg_price_pos = 0.5 * (on_pos + off_pos)
+    price_discount = float(np.clip(1.0 - avg_price_pos, 0.0, 1.0))
+
+    inventory_ref = float(max(1.0, norm.get("inventory_raw", norm.get("initial_inventory", 1.0))))
+    sellthrough = float(np.clip((int(bookings_online) + int(bookings_offline)) / inventory_ref, 0.0, 1.0))
+
+    price_penalty = float(max(0.0, price_weight) * pressure * price_discount)
+    sellthrough_penalty = float(max(0.0, sellthrough_weight) * pressure * max(0.0, sellthrough - 0.35))
+    shaping_penalty = float(np.clip(price_penalty + sellthrough_penalty, 0.0, 0.30))
+    reward_multiplier = float(1.0 - shaping_penalty)
+
+    return {
+        "reward_multiplier": reward_multiplier,
+        "pressure": pressure,
+        "price_discount": price_discount,
+        "sellthrough": sellthrough,
+        "price_penalty": price_penalty,
+        "sellthrough_penalty": sellthrough_penalty,
+        "shaping_penalty": shaping_penalty,
+    }
+
+
 def compute_bucket_rewards(
     bookings_online: int,
     bookings_offline: int,
@@ -232,6 +292,13 @@ def compute_bucket_rewards(
     commission_rate: float,
     subsidy_ratio: float,
     reward_hotel_ratio: float,
+    state: Dict | None = None,
+    online_price_min: float | None = None,
+    online_price_max: float | None = None,
+    offline_price_min: float | None = None,
+    offline_price_max: float | None = None,
+    reward_shape_price_weight: float = 0.0,
+    reward_shape_sellthrough_weight: float = 0.0,
 ) -> Dict[str, float]:
     """统一CEM奖励口径：酒店收益、OTA利润、系统收益与训练奖励。"""
     bo = int(max(0, bookings_online))
@@ -247,15 +314,32 @@ def compute_bucket_rewards(
     subsidy_cost = commission_revenue * sr
     profit_ota = commission_revenue - subsidy_cost
     system_profit = revenue_hotel + profit_ota
-    reward_hotel = r_h * revenue_hotel + (1.0 - r_h) * system_profit
+    base_reward_hotel = r_h * revenue_hotel + (1.0 - r_h) * system_profit
+
+    shaping_parts = compute_reward_shaping(
+        state=state,
+        bookings_online=bo,
+        bookings_offline=bf,
+        price_online_base=pon,
+        price_offline=poff,
+        online_price_min=float(pon if online_price_min is None else online_price_min),
+        online_price_max=float(pon if online_price_max is None else online_price_max),
+        offline_price_min=float(poff if offline_price_min is None else offline_price_min),
+        offline_price_max=float(poff if offline_price_max is None else offline_price_max),
+        price_weight=float(reward_shape_price_weight),
+        sellthrough_weight=float(reward_shape_sellthrough_weight),
+    )
+    reward_hotel = float(base_reward_hotel * shaping_parts["reward_multiplier"])
 
     return {
         "revenue_hotel": float(revenue_hotel),
         "profit_ota": float(profit_ota),
         "system_profit": float(system_profit),
+        "base_reward_hotel": float(base_reward_hotel),
         "reward_hotel": float(reward_hotel),
         "subsidy_cost": float(subsidy_cost),
         "commission_revenue": float(commission_revenue),
+        **shaping_parts,
     }
 
 

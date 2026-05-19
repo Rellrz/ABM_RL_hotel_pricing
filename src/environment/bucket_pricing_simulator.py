@@ -165,6 +165,13 @@ class BucketPricingSimulator:
             commission_rate=self.config.commission_rate,
             subsidy_ratio=sr,
             reward_hotel_ratio=self.config.reward_hotel_ratio,
+            state=self.decision_state_by_offset[off],
+            online_price_min=self.config.online_price_min,
+            online_price_max=self.config.online_price_max,
+            offline_price_min=self.config.offline_price_min,
+            offline_price_max=self.config.offline_price_max,
+            reward_shape_price_weight=self.config.reward_shape_price_weight,
+            reward_shape_sellthrough_weight=self.config.reward_shape_sellthrough_weight,
         )
 
         state_for_update = enrich_bucket_state(dict(self.decision_state_by_offset[off]))

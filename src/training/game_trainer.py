@@ -156,6 +156,10 @@ def train_game_system(historical_data: pd.DataFrame,
         total_bookings_online = 0
         total_bookings_offline = 0
         total_subsidy = 0.0
+        total_train_base_reward_hotel = 0.0
+        total_train_shaped_reward_hotel = 0.0
+        total_train_shaping_penalty = 0.0
+        total_train_shaping_updates = 0
 
         is_last_episode = (episode == episodes - 1)
 
@@ -297,9 +301,23 @@ def train_game_system(historical_data: pd.DataFrame,
                         commission_rate=RL_CONFIG.commission_rate,
                         subsidy_ratio=sr_prev,
                         reward_hotel_ratio=RL_CONFIG.reward_hotel_ratio,
+                        state=decision_state_by_offset[off],
+                        online_price_min=RL_CONFIG.online_price_min,
+                        online_price_max=RL_CONFIG.online_price_max,
+                        offline_price_min=RL_CONFIG.offline_price_min,
+                        offline_price_max=RL_CONFIG.offline_price_max,
+                        reward_shape_price_weight=RL_CONFIG.reward_shape_price_weight,
+                        reward_shape_sellthrough_weight=RL_CONFIG.reward_shape_sellthrough_weight,
                     )
                     reward_hotel_acc = float(reward_parts["reward_hotel"])
+                    base_reward_hotel_acc = float(reward_parts["base_reward_hotel"])
+                    shaping_penalty_acc = float(reward_parts["shaping_penalty"])
                     subsidy_cost_acc = float(reward_parts["subsidy_cost"])
+
+                    total_train_base_reward_hotel += base_reward_hotel_acc
+                    total_train_shaped_reward_hotel += reward_hotel_acc
+                    total_train_shaping_penalty += shaping_penalty_acc
+                    total_train_shaping_updates += 1
 
                     state_for_update = dict(decision_state_by_offset[off])
                     next_state_for_update = _build_stage_state(env, buckets, off, int(bucket_of_offset[off]))
@@ -363,9 +381,23 @@ def train_game_system(historical_data: pd.DataFrame,
                 commission_rate=RL_CONFIG.commission_rate,
                 subsidy_ratio=sr_prev,
                 reward_hotel_ratio=RL_CONFIG.reward_hotel_ratio,
+                state=decision_state_by_offset[off],
+                online_price_min=RL_CONFIG.online_price_min,
+                online_price_max=RL_CONFIG.online_price_max,
+                offline_price_min=RL_CONFIG.offline_price_min,
+                offline_price_max=RL_CONFIG.offline_price_max,
+                reward_shape_price_weight=RL_CONFIG.reward_shape_price_weight,
+                reward_shape_sellthrough_weight=RL_CONFIG.reward_shape_sellthrough_weight,
             )
             reward_hotel_acc = float(reward_parts["reward_hotel"])
+            base_reward_hotel_acc = float(reward_parts["base_reward_hotel"])
+            shaping_penalty_acc = float(reward_parts["shaping_penalty"])
             subsidy_cost_acc = float(reward_parts["subsidy_cost"])
+
+            total_train_base_reward_hotel += base_reward_hotel_acc
+            total_train_shaped_reward_hotel += reward_hotel_acc
+            total_train_shaping_penalty += shaping_penalty_acc
+            total_train_shaping_updates += 1
 
             state_for_update = dict(decision_state_by_offset[off])
             next_state_for_update = _build_stage_state(env, buckets, off, int(bucket_of_offset[off]))
@@ -388,7 +420,11 @@ def train_game_system(historical_data: pd.DataFrame,
             'bookings_offline': total_bookings_offline,
             'total_subsidy': total_subsidy,
             'avg_subsidy_amount': total_subsidy / max(1, total_bookings_online),
-            'avg_subsidy_ratio': last_subsidy_ratio  # 最后一天的补贴比例
+            'avg_subsidy_ratio': last_subsidy_ratio,  # 最后一天的补贴比例
+            'train_base_reward_hotel': total_train_base_reward_hotel,
+            'train_shaped_reward_hotel': total_train_shaped_reward_hotel,
+            'avg_shaping_penalty': total_train_shaping_penalty / max(1, total_train_shaping_updates),
+            'n_shaping_updates': total_train_shaping_updates,
         })
         
         # 监控
@@ -405,6 +441,9 @@ def train_game_system(historical_data: pd.DataFrame,
         writer.add_scalar('Reward/Hotel_Revenue', total_reward_hotel, episode)
         writer.add_scalar('Reward/OTA_Profit', total_reward_ota, episode)
         writer.add_scalar('Reward/Total_Revenue', total_reward_hotel + total_reward_ota, episode)
+        writer.add_scalar('Reward/Train_Base_Hotel_Reward', total_train_base_reward_hotel, episode)
+        writer.add_scalar('Reward/Train_Shaped_Hotel_Reward', total_train_shaped_reward_hotel, episode)
+        writer.add_scalar('Reward/Train_Avg_Shaping_Penalty', total_train_shaping_penalty / max(1, total_train_shaping_updates), episode)
         writer.add_scalar('Bookings/Online', total_bookings_online, episode)
         writer.add_scalar('Bookings/Offline', total_bookings_offline, episode)
         writer.add_scalar('Bookings/Total', total_bookings_online + total_bookings_offline, episode)
@@ -422,14 +461,18 @@ def train_game_system(historical_data: pd.DataFrame,
             avg_bookings_offline = np.mean([info['bookings_offline'] for info in episode_info[-10:]])
             avg_subsidy_amount = np.mean([info['avg_subsidy_amount'] for info in episode_info[-10:]])
             avg_subsidy_ratio = np.mean([info['avg_subsidy_ratio'] for info in episode_info[-10:]])
+            avg_train_base_reward = np.mean([info['train_base_reward_hotel'] for info in episode_info[-10:]])
+            avg_train_shaped_reward = np.mean([info['train_shaped_reward_hotel'] for info in episode_info[-10:]])
+            avg_shaping_penalty = np.mean([info['avg_shaping_penalty'] for info in episode_info[-10:]])
             
             print(f"Episode {episode + 1}/{episodes}: "
                   f"Hotel=${avg_hotel:.2f}, "
                   f"OTA=${avg_ota:.2f}, "
                   f"Online={avg_bookings_online:.1f}, "
                   f"Offline={avg_bookings_offline:.1f}, "
-                  f"SubsidyRatio={avg_subsidy_ratio*100:.1f}%, "
-                  f"SubsidyAmt={avg_subsidy_amount:.2f}元, "
+                  f"TrainBase=${avg_train_base_reward:.2f}, TrainShaped=${avg_train_shaped_reward:.2f}, "
+                  f"ShapePenalty={avg_shaping_penalty:.4f}, "
+                  f"SubsidyRatio={avg_subsidy_ratio*100:.1f}%, SubsidyAmt={avg_subsidy_amount:.2f}元, "
                   f"Explore={exploration_rate:.3f}")
     
     print("\n训练完成！")
