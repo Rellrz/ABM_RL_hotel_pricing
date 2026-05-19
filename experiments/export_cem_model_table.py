@@ -1,5 +1,9 @@
 from __future__ import annotations
-
+'''
+python experiments/export_cem
+_model_table.py outputs/models/hotel_joint_agent_20260509_203212.json
+/Users/raily/Desktop/hotel_pricing/ABM_hotel_pricing/outputs/models/hotel_joint_agent_20260509_203212_decoded_full.csv
+'''
 import argparse
 import csv
 import json
@@ -8,26 +12,31 @@ from pathlib import Path
 
 
 BUCKET_LABELS = ["0", "1", "2-3", "4-6", "7-13", "14-29", "30-59", "60-90"]
-INVENTORY_NAMES = ["low_inv", "mid_inv", "high_inv"]
+INVENTORY_NAMES = ["very_low_inv", "low_inv", "mid_inv", "high_inv", "very_high_inv"]
 SEASON_NAMES = ["low", "mid", "high"]
 WEEKDAY_NAMES = ["workday", "weekend"]
 DEFAULT_MEAN = [110.0, 110.0]
 DEFAULT_COV = [[2500.0, 0.0], [0.0, 2500.0]]
-TOTAL_STATES = 144
+N_INVENTORY_LEVELS = 5
+N_SEASONS = 3
+N_WEEKDAY_TYPES = 2
+N_STAGE_BUCKETS = 8
+BASE_STATE_COUNT = N_INVENTORY_LEVELS * N_SEASONS * N_WEEKDAY_TYPES
+TOTAL_STATES = BASE_STATE_COUNT * N_STAGE_BUCKETS
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Decode a saved CEM model into a full 144-state CSV table.")
+    parser = argparse.ArgumentParser(description="Decode a saved CEM model into a full 240-state CSV table.")
     parser.add_argument("model_path", type=Path)
     parser.add_argument("--output", type=Path, default=None)
     return parser
 
 
 def decode_state(state_id: int) -> tuple[int, int, int, int]:
-    inventory_level = state_id // 48
-    season = (state_id // 16) % 3
-    weekday = (state_id // 8) % 2
-    stage_id = state_id % 8
+    inventory_level = state_id // (N_SEASONS * N_WEEKDAY_TYPES * N_STAGE_BUCKETS)
+    season = (state_id // (N_WEEKDAY_TYPES * N_STAGE_BUCKETS)) % N_SEASONS
+    weekday = (state_id // N_STAGE_BUCKETS) % N_WEEKDAY_TYPES
+    stage_id = state_id % N_STAGE_BUCKETS
     return inventory_level, season, weekday, stage_id
 
 

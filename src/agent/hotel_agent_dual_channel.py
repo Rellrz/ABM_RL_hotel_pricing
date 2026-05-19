@@ -71,7 +71,7 @@ class HotelAgentDualChannel:
             std_decay: 标准差衰减率
         """
         self.n_states = n_states
-        self.n_base_states = 18
+        self.n_base_states = 30
         self.n_stages = max(1, int(n_states) // self.n_base_states)
         self.commission_rate = commission_rate
         self.online_price_min = online_price_min
@@ -144,10 +144,10 @@ class HotelAgentDualChannel:
         """
         离散化状态
         
-        状态空间：库存档位(3) × 季节(3) × 日期类型(2) = 18种状态
+        状态空间：库存档位(5) × 季节(3) × 日期类型(2) = 30种状态
         
         关键修正：
-        - 直接使用环境返回的inventory_level（0-2），不重新计算
+        - 直接使用环境返回的inventory_level（0-4），不重新计算
         - 正确使用weekday维度，避免状态空间塌缩
         
         Args:
@@ -156,25 +156,24 @@ class HotelAgentDualChannel:
             weekday: 是否周末（0-1），如果提供则覆盖state中的值
             
         Returns:
-            state_idx: 离散化的状态索引（0-17）
+            state_idx: 离散化的状态索引（0-29）
         """
         if isinstance(state, (int, np.integer)):
             return int(state)
         
         # 提取状态特征
         if isinstance(state, dict):
-            # 直接使用环境已经离散化好的inventory_level（0-2）
-            inventory_level = state.get('inventory_level', 2)
+            # 直接使用环境已经离散化好的inventory_level（0-4）
+            inventory_level = state.get('inventory_level', 4)
             season = state.get('season', 0) if season is None else season
             weekday = state.get('weekday', 0) if weekday is None else weekday
         else:
-            inventory_level = 2
+            inventory_level = 4
             season = season if season is not None else 0
             weekday = weekday if weekday is not None else 0
         
-        # 库存档位（0-2）：环境已离散化
-        # 0: ≤33间, 1: 34-66间, 2: ≥67间
-        inventory_level = int(inventory_level)
+        # 库存档位（0-4）：环境已离散化
+        inventory_level = int(np.clip(inventory_level, 0, 4))
         # 季节（0-2）：淡季、平季、旺季
         season = int(season)
         # 日期类型（0-1）：工作日、周末

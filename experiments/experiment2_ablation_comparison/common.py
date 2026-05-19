@@ -42,13 +42,26 @@ def build_bucket_mapping(buckets: List[Tuple[int, int]], window_days: int) -> Tu
     return bucket_of_offset, entry_offsets, exit_offsets
 
 
-def state_to_144(state: Dict, stage_id: int) -> int:
-    inv = int(np.clip(int(state.get("inventory_level", 2)), 0, 2))
+N_INVENTORY_LEVELS = 5
+N_SEASONS = 3
+N_WEEKDAY_TYPES = 2
+N_STAGE_BUCKETS = 8
+BASE_STATE_COUNT = N_INVENTORY_LEVELS * N_SEASONS * N_WEEKDAY_TYPES
+TOTAL_Q_STATES = BASE_STATE_COUNT * N_STAGE_BUCKETS
+
+
+def state_to_q_state(state: Dict, stage_id: int) -> int:
+    inv = int(np.clip(int(state.get("inventory_level", 4)), 0, N_INVENTORY_LEVELS - 1))
     season = int(np.clip(int(state.get("season", 0)), 0, 2))
     weekday = int(np.clip(int(state.get("weekday", 0)), 0, 1))
-    stage_id = int(np.clip(stage_id, 0, 7))
-    base18 = inv * 6 + season * 2 + weekday
-    return int(base18 * 8 + stage_id)
+    stage_id = int(np.clip(stage_id, 0, N_STAGE_BUCKETS - 1))
+    base_state = inv * (N_SEASONS * N_WEEKDAY_TYPES) + season * N_WEEKDAY_TYPES + weekday
+    return int(base_state * N_STAGE_BUCKETS + stage_id)
+
+
+def state_to_144(state: Dict, stage_id: int) -> int:
+    """Backward-compatible alias. The state space now has 240 states."""
+    return state_to_q_state(state, stage_id)
 
 
 def q_epsilon(step: int, eps_start: float, eps_end: float, decay_steps: int) -> float:

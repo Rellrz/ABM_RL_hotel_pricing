@@ -87,9 +87,9 @@ def train_game_system(historical_data: pd.DataFrame,
         episode_days=episode_days,
     )
     
-    # 创建酒店Agent（18×K）
+    # 创建酒店Agent（30×K）
     hotel_agent = HotelAgentDualChannel(
-        n_states=18 * n_stages,
+        n_states=30 * n_stages,
         commission_rate=RL_CONFIG.commission_rate,
         online_price_min=RL_CONFIG.online_price_min,
         online_price_max=RL_CONFIG.online_price_max,

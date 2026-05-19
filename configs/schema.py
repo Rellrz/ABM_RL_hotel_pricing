@@ -85,7 +85,7 @@ class RLConfig:
     min_std: float = 3.0
     std_decay: float = 0.999
 
-    reward_hotel_ratio: float = 0
+    reward_hotel_ratio: float = 1
     reward_ota_ratio: float = 0
 
     cem_algorithm: str = 'cem'
@@ -125,8 +125,8 @@ class RLConfig:
 @dataclass
 class EnvConfig:
     """酒店环境参数"""
-    initial_inventory: int = 80
-    max_inventory: int = 80
+    initial_inventory: int = 70
+    max_inventory: int = 70
     min_inventory: int = 0
     booking_window_days: int = 91
 

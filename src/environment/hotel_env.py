@@ -183,16 +183,9 @@ class HotelEnvironment:
             - 工作日类型：假设第0天为周一，周六日(5,6)为周末
             - 状态编码：库存等级(0-4) × 季节(0-2) × 日期类型(0-1) = 30种状态
         """
-        # 当前库存离散化（s_t^1）- 注释掉库存数量区分
+        # 当前库存离散化（5档）
         current_inventory = self.future_inventory[0] if self.future_inventory else self.current_inventory
-        
-        # 注释掉库存等级区分，统一使用固定值
-        if current_inventory <= int(self.initial_inventory * (1/3)):
-             inventory_level = 0
-        elif current_inventory <= int(self.initial_inventory * (2/3)):
-             inventory_level = 1
-        else:
-             inventory_level = 2
+        inventory_level = self._discretize_inventory_level(current_inventory)
         
         # 根据月份确定季节（方案要求：11-2月→淡季0，3-5/9-10月→平季1，6-8月→旺季2）
         month = (self.day // 30) % 12 + 1  # 简化：假设每月30天
@@ -234,13 +227,8 @@ class HotelEnvironment:
         else:
             target_inventory = self.initial_inventory  # 超出窗口，使用初始库存
         
-        # 库存离散化
-        if target_inventory <= int(self.initial_inventory * (1/3)):
-            inventory_level = 0
-        elif target_inventory <= int(self.initial_inventory * (2/3)):
-            inventory_level = 1
-        else:
-            inventory_level = 2
+        # 库存离散化（5档）
+        inventory_level = self._discretize_inventory_level(target_inventory)
         
         # 计算该天的季节
         month = (target_day // 30) % 12 + 1
@@ -262,6 +250,18 @@ class HotelEnvironment:
             'season': season,
             'weekday': weekday_type
         }
+
+    def _discretize_inventory_level(self, inventory: int) -> int:
+        """将库存按初始库存的 20/40/60/80 阈值离散为 5 档。"""
+        if inventory <= int(self.initial_inventory * 0.2):
+            return 0
+        if inventory <= int(self.initial_inventory * 0.4):
+            return 1
+        if inventory <= int(self.initial_inventory * 0.6):
+            return 2
+        if inventory <= int(self.initial_inventory * 0.8):
+            return 3
+        return 4
     
     def _get_daily_inventory_dict(self) -> Dict[int, int]:
         """

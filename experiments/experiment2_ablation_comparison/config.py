@@ -171,8 +171,8 @@ class Experiment2Config:
 
     @property
     def q_n_states(self) -> int:
-        # 3*3*2*8 = 144
-        return 144
+        # 5*3*2*8 = 240
+        return 240
 
     @property
     def q_action_grid(self) -> np.ndarray:

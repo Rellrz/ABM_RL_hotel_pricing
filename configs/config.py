@@ -55,7 +55,7 @@ __all__ = [
 ]
 
 # 使用更直观的常量切换扰动模板（none / mild / medium / stress）
-ABM_PERTURBATION_TEMPLATE = 'none'
+ABM_PERTURBATION_TEMPLATE = 'medium'
 
 (
     PATH_CONFIG,
