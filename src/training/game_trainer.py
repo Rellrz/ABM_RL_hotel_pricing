@@ -48,6 +48,15 @@ def _parse_buckets(spec: Optional[str], n: int) -> List[Tuple[int, int]]:
     return buckets
 
 
+def _build_stage_state(env: HotelEnvironment, buckets: List[Tuple[int, int]], off: int, stage_id: int) -> Dict:
+    st = dict(env.get_raw_state_for_day_offset(off))
+    bucket_start, bucket_end = buckets[stage_id]
+    st['stage_id'] = int(stage_id)
+    st['bucket_start'] = int(bucket_start)
+    st['bucket_end'] = int(bucket_end)
+    return enrich_bucket_state(st)
+
+
 def train_game_system(historical_data: pd.DataFrame, 
                       episodes: int = 100,
                       training_mode: str = 'simultaneous',
@@ -169,8 +178,7 @@ def train_game_system(historical_data: pd.DataFrame,
 
         for sid, (s, e) in enumerate(buckets):
             ref_off = int(min(int(e), booking_window_days - 1))
-            st = enrich_bucket_state(dict(env.get_raw_state_for_day_offset(ref_off)))
-            st['stage_id'] = int(sid)
+            st = _build_stage_state(env, buckets, ref_off, sid)
 
             pob, pof = hotel_agent.select_action(st, deterministic=False)
             if training_mode == 'fixed_ota':
@@ -194,8 +202,7 @@ def train_game_system(historical_data: pd.DataFrame,
             # 在桶的右端点为新进入该桶的cohort定价。
             for off in entry_offsets:
                 sid = int(bucket_of_offset[off])
-                st = enrich_bucket_state(dict(env.get_raw_state_for_day_offset(off)))
-                st['stage_id'] = sid
+                st = _build_stage_state(env, buckets, off, sid)
 
                 pob, pof = hotel_agent.select_action(st, deterministic=False)
                 if training_mode == 'fixed_ota':
@@ -295,8 +302,7 @@ def train_game_system(historical_data: pd.DataFrame,
                     subsidy_cost_acc = float(reward_parts["subsidy_cost"])
 
                     state_for_update = dict(decision_state_by_offset[off])
-                    next_state_for_update = dict(env.get_raw_state_for_day_offset(off))
-                    next_state_for_update['stage_id'] = int(bucket_of_offset[off])
+                    next_state_for_update = _build_stage_state(env, buckets, off, int(bucket_of_offset[off]))
 
                     if train_hotel:
                         hotel_agent.update(
@@ -362,8 +368,7 @@ def train_game_system(historical_data: pd.DataFrame,
             subsidy_cost_acc = float(reward_parts["subsidy_cost"])
 
             state_for_update = dict(decision_state_by_offset[off])
-            next_state_for_update = dict(env.get_raw_state_for_day_offset(off))
-            next_state_for_update['stage_id'] = int(bucket_of_offset[off])
+            next_state_for_update = _build_stage_state(env, buckets, off, int(bucket_of_offset[off]))
 
             if train_hotel:
                 hotel_agent.update(state_for_update, np.array([pob_prev, pof_prev]), reward_hotel_acc, next_state_for_update, done=True, ota_subsidy=subsidy_cost_acc)

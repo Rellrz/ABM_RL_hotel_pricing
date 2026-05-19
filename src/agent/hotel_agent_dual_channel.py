@@ -14,11 +14,11 @@
 
 import numpy as np
 from collections import defaultdict, deque
-from typing import Union, List, Dict, Any, Tuple
+from typing import Union, Dict, Any
 from src.algorithms.cem_nn import NeuralCrossEntropyMethod
 from src.algorithms.multivariate_cem import MultivariateCrossEntropyMethod
 from configs.config import RL_CONFIG
-from src.utils.common import discretize_bucket_state
+from src.utils.common import build_cem_state_key, discretize_bucket_state
 
 
 class HotelAgentDualChannel:
@@ -141,23 +141,19 @@ class HotelAgentDualChannel:
         self.total_revenue_offline = 0.0
         self.episode_count = 0
         
-    def discretize_state(self, state: Dict, season: int = None, weekday: bool = None) -> int:
+    def discretize_state(self, state: Any, season: int = None, weekday: bool = None) -> Any:
         """
-        离散化状态
-        
-        状态空间：库存档位(5) × 季节(3) × 日期类型(2) = 30种状态
-        
-        关键修正：
-        - 直接使用环境返回的inventory_level（0-4），不重新计算
-        - 正确使用weekday维度，避免状态空间塌缩
+        统一状态转换：
+        - `cem` 使用 richer tuple state key
+        - `cem_nn` 继续使用离散整数状态
         
         Args:
-            state: 状态字典（必须包含inventory_level, season, weekday）
+            state: 状态字典
             season: 季节（0-2），如果提供则覆盖state中的值
             weekday: 是否周末（0-1），如果提供则覆盖state中的值
             
         Returns:
-            state_idx: 离散化的状态索引（0-29）
+            CEM 返回 tuple key，CEM-NN 返回离散状态索引
         """
         if isinstance(state, (int, np.integer)):
             return int(state)
@@ -169,18 +165,20 @@ class HotelAgentDualChannel:
                 normalized["season"] = int(season)
             if weekday is not None:
                 normalized["weekday"] = int(weekday)
+            if self.algorithm_type != 'cem_nn':
+                return build_cem_state_key(normalized, stage_id=stage_id)
             return discretize_bucket_state(
                 normalized,
                 stage_id=stage_id,
                 n_stage_buckets=self.n_stages,
             )
-        normalized = {
+        fallback = {
             "inventory_level": 4,
             "season": int(season if season is not None else 0),
             "weekday": int(weekday if weekday is not None else 0),
         }
         return discretize_bucket_state(
-            normalized,
+            fallback,
             stage_id=0,
             n_stage_buckets=self.n_stages,
         )

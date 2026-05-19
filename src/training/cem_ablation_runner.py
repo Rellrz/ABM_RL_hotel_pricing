@@ -9,7 +9,7 @@ import numpy as np
 from tqdm import tqdm
 
 from src.agent.independent_cem_agent import IndependentCEMAgent
-from src.utils.common import state_to_144
+from src.utils.common import build_cem_state_key
 from configs.experiment2 import Experiment2Config
 from src.environment.bucket_pricing_simulator import BucketPricingSimulator
 from src.evaluation.policy_evaluator import evaluate_policy
@@ -39,7 +39,7 @@ def _run_single_seed_multivariate(
     init_actions = []
     for sid in range(sim.n_stages):
         st0 = sim.get_state_by_stage(sid)
-        s0 = state_to_144(st0, sid)
+        s0 = build_cem_state_key(st0, sid)
         a0 = cem.select_action(s0, deterministic=False)
         init_actions.append((float(a0[0]), float(a0[1])))
     sim.initialize_episode_decisions(init_actions)
@@ -64,19 +64,17 @@ def _run_single_seed_multivariate(
             init_actions = []
             for sid in range(sim.n_stages):
                 st0 = sim.get_state_by_stage(sid)
-                s0 = state_to_144(st0, sid)
+                s0 = build_cem_state_key(st0, sid)
                 a0 = cem.select_action(s0, deterministic=False)
                 init_actions.append((float(a0[0]), float(a0[1])))
             sim.initialize_episode_decisions(init_actions)
             done = False
 
-        states = []
         actions = []
         for sid in range(sim.n_stages):
             st = sim.get_state_by_stage(sid)
-            s_idx = state_to_144(st, sid)
+            s_idx = build_cem_state_key(st, sid)
             act = cem.select_action(s_idx, deterministic=False)
-            states.append(s_idx)
             actions.append((float(act[0]), float(act[1])))
 
         out = sim.step_day(actions)
@@ -84,8 +82,8 @@ def _run_single_seed_multivariate(
         episode_ota_profit += float(out.reward_ota)
         update_events = out.info.get("update_events", [])
         for ev in update_events:
-            s = state_to_144(ev.state, int(ev.state.get("stage_id", 0)))
-            s_next = state_to_144(ev.next_state, int(ev.next_state.get("stage_id", 0)))
+            s = build_cem_state_key(ev.state, int(ev.state.get("stage_id", 0)))
+            s_next = build_cem_state_key(ev.next_state, int(ev.next_state.get("stage_id", 0)))
             a = np.asarray(ev.action_pair, dtype=np.float64)
             cem.update(s, a, float(ev.reward), s_next, bool(ev.done))
 
@@ -116,7 +114,7 @@ def _run_single_seed_multivariate(
     pbar.close()
 
     def stage_policy_fn(stage_id: int, st: dict):
-        s_idx = state_to_144(st, stage_id)
+        s_idx = build_cem_state_key(st, stage_id)
         action = cem.select_action(s_idx, deterministic=True)
         return float(action[0]), float(action[1])
 
@@ -154,7 +152,7 @@ def _run_single_seed_independent(
     init_actions = []
     for sid in range(sim.n_stages):
         st0 = sim.get_state_by_stage(sid)
-        s0 = state_to_144(st0, sid)
+        s0 = build_cem_state_key(st0, sid)
         a0 = agent.select_action(s0, deterministic=False)
         init_actions.append((float(a0[0]), float(a0[1])))
     sim.initialize_episode_decisions(init_actions)
@@ -178,19 +176,17 @@ def _run_single_seed_independent(
             init_actions = []
             for sid in range(sim.n_stages):
                 st0 = sim.get_state_by_stage(sid)
-                s0 = state_to_144(st0, sid)
+                s0 = build_cem_state_key(st0, sid)
                 a0 = agent.select_action(s0, deterministic=False)
                 init_actions.append((float(a0[0]), float(a0[1])))
             sim.initialize_episode_decisions(init_actions)
             done = False
 
-        states = []
         actions = []
         for sid in range(sim.n_stages):
             st = sim.get_state_by_stage(sid)
-            s_idx = state_to_144(st, sid)
+            s_idx = build_cem_state_key(st, sid)
             act = agent.select_action(s_idx, deterministic=False)
-            states.append(s_idx)
             actions.append((float(act[0]), float(act[1])))
 
         out = sim.step_day(actions)
@@ -198,8 +194,8 @@ def _run_single_seed_independent(
         episode_ota_profit += float(out.reward_ota)
         update_events = out.info.get("update_events", [])
         for ev in update_events:
-            s = state_to_144(ev.state, int(ev.state.get("stage_id", 0)))
-            s_next = state_to_144(ev.next_state, int(ev.next_state.get("stage_id", 0)))
+            s = build_cem_state_key(ev.state, int(ev.state.get("stage_id", 0)))
+            s_next = build_cem_state_key(ev.next_state, int(ev.next_state.get("stage_id", 0)))
             a = np.asarray(ev.action_pair, dtype=np.float64)
             agent.update(s, a, float(ev.reward), s_next, bool(ev.done))
 
@@ -230,7 +226,7 @@ def _run_single_seed_independent(
     pbar.close()
 
     def stage_policy_fn(stage_id: int, st: dict):
-        s_idx = state_to_144(st, stage_id)
+        s_idx = build_cem_state_key(st, stage_id)
         action = agent.select_action(s_idx, deterministic=True)
         return float(action[0]), float(action[1])
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+from typing import Any
 
 from configs.experiment2 import Experiment2Config
 from src.algorithms.multivariate_cem import MultivariateCrossEntropyMethod
@@ -27,10 +28,10 @@ class IndependentCEMAgent:
             diagonal_covariance=True,
         )
 
-    def select_action(self, state_idx: int, deterministic: bool = False) -> np.ndarray:
+    def select_action(self, state_idx: Any, deterministic: bool = False) -> np.ndarray:
         return self.agent.select_action(state_idx, deterministic=deterministic).astype(np.float64)
 
-    def update(self, s: int, a_pair: np.ndarray, r: float, s_next: int, done: bool) -> None:
+    def update(self, s: Any, a_pair: np.ndarray, r: float, s_next: Any, done: bool) -> None:
         self.agent.update(s, a_pair, float(r), s_next, done)
 
     def end_episode(self) -> None:

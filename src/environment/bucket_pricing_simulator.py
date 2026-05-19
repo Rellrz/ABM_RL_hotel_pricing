@@ -90,12 +90,18 @@ class BucketPricingSimulator:
         self.acc_bookings_offline_by_offset = [0] * self.config.booking_window_days
         return self.env.reset()
 
+    def _build_stage_raw_state(self, off: int, stage_id: int) -> Dict:
+        st = dict(self.env.get_raw_state_for_day_offset(off))
+        bucket_start, bucket_end = self.buckets[stage_id]
+        st["stage_id"] = int(stage_id)
+        st["bucket_start"] = int(bucket_start)
+        st["bucket_end"] = int(bucket_end)
+        return st
+
     def get_state_by_stage(self, stage_id: int) -> Dict:
         _s, e = self.buckets[stage_id]
         ref_off = min(e, self.config.booking_window_days - 1)
-        st = enrich_bucket_state(dict(self.env.get_raw_state_for_day_offset(ref_off)))
-        st["stage_id"] = int(stage_id)
-        return st
+        return enrich_bucket_state(self._build_stage_raw_state(ref_off, stage_id))
 
     def get_q_state_by_stage(self, stage_id: int) -> int:
         return discretize_bucket_state(self.get_state_by_stage(stage_id), stage_id=stage_id)
@@ -131,8 +137,7 @@ class BucketPricingSimulator:
             raise ValueError(f"Expected {self.n_stages} stage actions, got {len(stage_actions)}")
         for sid, (_s, e) in enumerate(self.buckets):
             ref_off = int(min(e, self.config.booking_window_days - 1))
-            st = dict(self.env.get_raw_state_for_day_offset(ref_off))
-            st["stage_id"] = int(sid)
+            st = self._build_stage_raw_state(ref_off, sid)
             pon, poff = self._price_clipped(stage_actions[sid])
             sr = float(self.ota.get_subsidy(pon, poff, lead_time=ref_off))
             for off in range(int(_s), min(int(e) + 1, self.config.booking_window_days)):
@@ -162,9 +167,10 @@ class BucketPricingSimulator:
             reward_hotel_ratio=self.config.reward_hotel_ratio,
         )
 
-        state_for_update = dict(self.decision_state_by_offset[off])
-        next_state_for_update = dict(self.env.get_raw_state_for_day_offset(off))
-        next_state_for_update["stage_id"] = int(self.bucket_of_offset[off])
+        state_for_update = enrich_bucket_state(dict(self.decision_state_by_offset[off]))
+        next_state_for_update = enrich_bucket_state(
+            self._build_stage_raw_state(off, int(self.bucket_of_offset[off]))
+        )
         return UpdateEvent(
             state=state_for_update,
             action_pair=(pon, poff),
@@ -194,8 +200,7 @@ class BucketPricingSimulator:
         # 在桶的右端点为新进入该桶的cohort重新定价。
         for off in self.entry_offsets:
             sid = int(self.bucket_of_offset[off])
-            st = dict(self.env.get_raw_state_for_day_offset(off))
-            st["stage_id"] = sid
+            st = self._build_stage_raw_state(off, sid)
             pon, poff = self._price_clipped(stage_actions[sid])
             sr = float(self.ota.get_subsidy(pon, poff, lead_time=off))
             self.acc_bookings_online_by_offset[off] = 0

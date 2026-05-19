@@ -88,6 +88,37 @@ def discretize_inventory_from_raw(
     return int(np.clip(level, 0, n_inventory_levels - 1))
 
 
+def _mean_ratio(values: List[float], initial_inventory: float) -> float:
+    if not values:
+        return 1.0
+    init_inv = float(max(1.0, initial_inventory))
+    return float(np.mean(np.asarray(values, dtype=float)) / init_inv)
+
+
+def _clip_ratio_bin(ratio: float, n_inventory_levels: int = N_INVENTORY_LEVELS) -> int:
+    return int(
+        discretize_inventory_from_raw(
+            inventory_raw=float(np.clip(ratio, 0.0, 1.0)),
+            initial_inventory=1.0,
+            n_inventory_levels=n_inventory_levels,
+        )
+    )
+
+
+def discretize_signed_slope(value: float) -> int:
+    """将库存曲线斜率离散为5档。"""
+    v = float(np.clip(value, -1.0, 1.0))
+    if v <= -0.35:
+        return 0
+    if v <= -0.10:
+        return 1
+    if v < 0.10:
+        return 2
+    if v < 0.35:
+        return 3
+    return 4
+
+
 def enrich_bucket_state(
     state: Dict,
     n_inventory_levels: int = N_INVENTORY_LEVELS,
@@ -95,13 +126,13 @@ def enrich_bucket_state(
     """将环境原始状态补齐为离散策略所需状态字段。"""
     out = dict(state)
     day = int(out.get("day", 0))
+    init_inv = float(out.get("initial_inventory", max(1.0, out.get("inventory_raw", 1.0))))
     if "season" not in out:
         out["season"] = int(season_from_day(day))
     if "weekday" not in out:
         out["weekday"] = int(weekday_type_from_day(day))
     if "inventory_level" not in out:
         inv_raw = float(out.get("inventory_raw", 0.0))
-        init_inv = float(out.get("initial_inventory", max(1.0, inv_raw)))
         out["inventory_level"] = int(
             discretize_inventory_from_raw(
                 inventory_raw=inv_raw,
@@ -109,6 +140,41 @@ def enrich_bucket_state(
                 n_inventory_levels=n_inventory_levels,
             )
         )
+    future_inventory = list(out.get("future_inventory", []) or [])
+    bucket_start = int(out.get("bucket_start", out.get("day_offset", 0)))
+    bucket_end = int(out.get("bucket_end", out.get("day_offset", bucket_start)))
+    if future_inventory:
+        last_idx = len(future_inventory) - 1
+        bucket_start = int(np.clip(bucket_start, 0, last_idx))
+        bucket_end = int(np.clip(bucket_end, bucket_start, last_idx))
+    else:
+        bucket_start = 0
+        bucket_end = 0
+
+    bucket_slice = future_inventory[bucket_start : bucket_end + 1] if future_inventory else [out.get("inventory_raw", init_inv)]
+    near_slice = future_inventory[: min(7, len(future_inventory))] if future_inventory else bucket_slice
+    far_anchor = min(max(30, bucket_end + 1), len(future_inventory) - 1) if future_inventory else 0
+    far_slice = (
+        future_inventory[far_anchor:]
+        if future_inventory and far_anchor < len(future_inventory)
+        else future_inventory[-min(30, len(future_inventory)) :]
+        if future_inventory
+        else bucket_slice
+    )
+
+    bucket_inv_ratio = _mean_ratio(bucket_slice, initial_inventory=init_inv)
+    near_inv_ratio = _mean_ratio(near_slice, initial_inventory=init_inv)
+    far_inv_ratio = _mean_ratio(far_slice, initial_inventory=init_inv)
+    inv_slope = near_inv_ratio - far_inv_ratio
+
+    out["bucket_inv_ratio"] = float(bucket_inv_ratio)
+    out["near_inv_ratio"] = float(near_inv_ratio)
+    out["far_inv_ratio"] = float(far_inv_ratio)
+    out["bucket_inv_bin"] = int(_clip_ratio_bin(bucket_inv_ratio, n_inventory_levels=n_inventory_levels))
+    out["near_inv_bin"] = int(_clip_ratio_bin(near_inv_ratio, n_inventory_levels=n_inventory_levels))
+    out["far_inv_bin"] = int(_clip_ratio_bin(far_inv_ratio, n_inventory_levels=n_inventory_levels))
+    out["inv_slope"] = float(inv_slope)
+    out["inv_slope_bin"] = int(discretize_signed_slope(inv_slope))
     return out
 
 
@@ -137,6 +203,25 @@ def state_to_q_state(state: Dict, stage_id: int) -> int:
 def state_to_144(state: Dict, stage_id: int) -> int:
     """Backward-compatible alias. The state space now has 240 states."""
     return discretize_bucket_state(state, stage_id=stage_id)
+
+
+def build_cem_state_key(state: Dict, stage_id: int | None = None) -> Tuple[int, ...]:
+    """为CEM构造更丰富的状态键。
+
+    结构：
+    `(stage_id, season, weekday, bucket_inv_bin, near_inv_bin, far_inv_bin, inv_slope_bin)`
+    """
+    norm = enrich_bucket_state(state)
+    stage = int(norm.get("stage_id", 0) if stage_id is None else stage_id)
+    return (
+        stage,
+        int(norm.get("season", 0)),
+        int(norm.get("weekday", 0)),
+        int(norm.get("bucket_inv_bin", norm.get("inventory_level", N_INVENTORY_LEVELS - 1))),
+        int(norm.get("near_inv_bin", norm.get("inventory_level", N_INVENTORY_LEVELS - 1))),
+        int(norm.get("far_inv_bin", norm.get("inventory_level", N_INVENTORY_LEVELS - 1))),
+        int(norm.get("inv_slope_bin", 2)),
+    )
 
 
 def compute_bucket_rewards(
@@ -179,4 +264,3 @@ def q_epsilon(step: int, eps_start: float, eps_end: float, decay_steps: int) -> 
         return float(eps_end)
     ratio = 1.0 - float(step) / float(decay_steps)
     return float(eps_end + (eps_start - eps_end) * ratio)
-

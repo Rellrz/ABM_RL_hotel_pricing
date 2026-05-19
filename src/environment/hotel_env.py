@@ -213,6 +213,7 @@ class HotelEnvironment:
             'inventory_raw': float(target_inventory),
             'initial_inventory': float(self.initial_inventory),
             'inventory_ratio': float(target_inventory / max(1, self.initial_inventory)),
+            'future_inventory': self.future_inventory.copy() if self.future_inventory else [],
             'day': int(target_day),
             'day_offset': day_offset,  # 额外信息：距离当前天的偏移
             'month': int(month),
