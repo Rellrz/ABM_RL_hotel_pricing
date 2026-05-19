@@ -158,65 +158,45 @@ class HotelEnvironment:
         return self._get_state()
     
     def _get_state(self) -> Dict[str, Any]:
+        """兼容接口：返回原始状态。"""
+        return self.get_raw_state()
+
+    def get_raw_state(self) -> Dict[str, Any]:
         """
-        获取当前酒店环境状态
+        获取当前酒店环境原始状态。
         
-        计算当前环境状态，包括库存水平、季节、工作日类型等信息。
+        只返回原始/连续信息，不做库存离散化；后续由上层统一做特征加工。
         
         Returns:
-            Dict[str, Any]: 当前状态字典，包含以下字段：
-                - inventory_level: 库存水平（0=极少，1=较少，2=中等，3=较多，4=充足）
-                - inventory_raw: 原始库存数量
-                - future_inventory: 未来库存数组
-                - day: 当前天数
-                - season: 季节（0=淡季，1=平季，2=旺季）
-                - weekday: 工作日类型（0=工作日，1=周末）
-                
-        状态计算逻辑：
-        1. 库存水平：根据当前库存数量离散化为5个等级
-        2. 季节判断：基于当前天数计算月份，按季节划分规则确定
-        3. 工作日类型：基于当前天数计算星期，周六日为周末
-        
-        Note:
-            - 库存水平离散化：0-20=极少，21-40=较少，41-60=中等，61-80=较多，81-100=充足
-            - 季节划分：11-2月=淡季，6-8月=旺季，其他=平季
-            - 工作日类型：假设第0天为周一，周六日(5,6)为周末
-            - 状态编码：库存等级(0-4) × 季节(0-2) × 日期类型(0-1) = 30种状态
+            Dict[str, Any]: 原始状态字典。
         """
-        # 当前库存离散化（5档）
         current_inventory = self.future_inventory[0] if self.future_inventory else self.current_inventory
-        inventory_level = self._discretize_inventory_level(current_inventory)
-        
-        # 根据月份确定季节（方案要求：11-2月→淡季0，3-5/9-10月→平季1，6-8月→旺季2）
-        month = (self.day // 30) % 12 + 1  # 简化：假设每月30天
-        if month in [11, 12, 1, 2]:  # 11-2月：淡季
-            season = 0
-        elif month in [6, 7, 8]:  # 6-8月：旺季
-            season = 2
-        else:  # 3-5月, 9-10月：平季
-            season = 1
-        
-        # 确定日期类型（工作日/周末）- 简化：假设第0天为周一
-        weekday_type = 1 if (self.day % 7) in [5, 6] else 0  # 周六(5)、周日(6)为周末
-        
+        day = int(self.day)
+        month = (day // 30) % 12 + 1
+        day_of_week = day % 7
         return {
-            'inventory_level': inventory_level,
-            'inventory_raw': current_inventory,
+            'inventory_raw': float(current_inventory),
+            'initial_inventory': float(self.initial_inventory),
+            'inventory_ratio': float(current_inventory / max(1, self.initial_inventory)),
             'future_inventory': self.future_inventory.copy() if self.future_inventory else [],
-            'day': self.day,
-            'season': season,
-            'weekday': weekday_type
+            'day': day,
+            'month': int(month),
+            'day_of_week': int(day_of_week),
         }
     
     def _get_state_for_day_offset(self, day_offset: int) -> Dict[str, Any]:
+        """兼容接口：返回offset原始状态。"""
+        return self.get_raw_state_for_day_offset(day_offset)
+
+    def get_raw_state_for_day_offset(self, day_offset: int) -> Dict[str, Any]:
         """
-        获取未来某一天的状态（用于窗口化连续定价决策）
+        获取未来某一天的原始状态（用于窗口化连续定价决策）
         
         Args:
             day_offset: 距离当前天的偏移量（0=今天, 1=明天, ..., 4=第5天）
         
         Returns:
-            Dict[str, Any]: 该天的状态字典
+            Dict[str, Any]: 该天的原始状态字典
         """
         # 计算目标日期
         target_day = self.day + day_offset
@@ -227,28 +207,16 @@ class HotelEnvironment:
         else:
             target_inventory = self.initial_inventory  # 超出窗口，使用初始库存
         
-        # 库存离散化（5档）
-        inventory_level = self._discretize_inventory_level(target_inventory)
-        
-        # 计算该天的季节
         month = (target_day // 30) % 12 + 1
-        if month in [11, 12, 1, 2]:
-            season = 0
-        elif month in [6, 7, 8]:
-            season = 2
-        else:
-            season = 1
-        
-        # 计算该天的工作日类型
-        weekday_type = 1 if (target_day % 7) in [5, 6] else 0
-        
+        day_of_week = target_day % 7
         return {
-            'inventory_level': inventory_level,
-            'inventory_raw': target_inventory,
-            'day': target_day,
+            'inventory_raw': float(target_inventory),
+            'initial_inventory': float(self.initial_inventory),
+            'inventory_ratio': float(target_inventory / max(1, self.initial_inventory)),
+            'day': int(target_day),
             'day_offset': day_offset,  # 额外信息：距离当前天的偏移
-            'season': season,
-            'weekday': weekday_type
+            'month': int(month),
+            'day_of_week': int(day_of_week),
         }
 
     def _discretize_inventory_level(self, inventory: int) -> int:

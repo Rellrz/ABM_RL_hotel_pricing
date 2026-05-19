@@ -8,11 +8,11 @@ from typing import Dict, List
 import numpy as np
 from tqdm import tqdm
 
-from agents.qlearning_agent import QLearningAgent
-from common import state_to_144
-from config import Experiment2Config
-from env_wrappers.base_simulator import BucketPricingSimulator
-from evaluation.evaluator import evaluate_policy
+from src.agent.qlearning_agent import QLearningAgent
+from src.utils.common import state_to_144
+from configs.experiment2 import Experiment2Config
+from src.environment.bucket_pricing_simulator import BucketPricingSimulator
+from src.evaluation.policy_evaluator import evaluate_policy
 
 
 def run_qlearning(config: Experiment2Config, historical_data) -> tuple[List[Dict], List[Dict]]:

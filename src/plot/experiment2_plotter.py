@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
-from config import Experiment2Config
+from configs.experiment2 import Experiment2Config
 
 
 def plot_learning_curves(

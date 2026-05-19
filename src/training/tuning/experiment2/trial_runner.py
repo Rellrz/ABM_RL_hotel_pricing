@@ -9,8 +9,8 @@ from typing import Dict, Iterable, Tuple
 import pandas as pd
 from tqdm import tqdm
 
-from config import Experiment2Config
-from trainers.ppo_trainer import run_ppo_single_seed
+from configs.experiment2 import Experiment2Config
+from src.training.ppo_baseline import run_ppo_single_seed
 
 
 def _run_one_seed(cfg: Experiment2Config, historical_data, seed: int, algorithm_name: str):

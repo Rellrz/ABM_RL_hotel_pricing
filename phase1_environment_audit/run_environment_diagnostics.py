@@ -14,7 +14,7 @@ from phase1_utils import (
     save_json,
 )
 from configs.config import ABM_CONFIG
-from experiments.experiment2_ablation_comparison.config import Experiment2Config
+from configs.experiment2 import Experiment2Config
 
 
 def build_parser() -> argparse.ArgumentParser:

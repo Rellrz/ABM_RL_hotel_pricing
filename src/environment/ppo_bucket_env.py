@@ -8,8 +8,8 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
-from config import Experiment2Config
-from env_wrappers.base_simulator import BucketPricingSimulator
+from configs.experiment2 import Experiment2Config
+from src.environment.bucket_pricing_simulator import BucketPricingSimulator
 
 
 class PPOBucketEnv(gym.Env):

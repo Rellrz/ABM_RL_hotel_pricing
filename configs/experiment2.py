@@ -9,7 +9,7 @@ from typing import Dict, List
 
 import numpy as np
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -17,7 +17,7 @@ from configs.config import ENV_CONFIG, RL_CONFIG
 
 
 THIS_DIR = Path(__file__).resolve().parent
-ARTIFACTS_DIR = THIS_DIR / "artifacts"
+ARTIFACTS_DIR = PROJECT_ROOT / "outputs" / "experiment2"
 RESULTS_DIR = ARTIFACTS_DIR / "results"
 FIGURES_DIR = ARTIFACTS_DIR / "figures"
 LOGS_DIR = ARTIFACTS_DIR / "logs"

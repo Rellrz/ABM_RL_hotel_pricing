@@ -8,11 +8,11 @@ from typing import Dict, List, Tuple
 import numpy as np
 from tqdm import tqdm
 
-from agents.independent_cem_agent import IndependentCEMAgent
-from common import state_to_144
-from config import Experiment2Config
-from env_wrappers.base_simulator import BucketPricingSimulator
-from evaluation.evaluator import evaluate_policy
+from src.agent.independent_cem_agent import IndependentCEMAgent
+from src.utils.common import state_to_144
+from configs.experiment2 import Experiment2Config
+from src.environment.bucket_pricing_simulator import BucketPricingSimulator
+from src.evaluation.policy_evaluator import evaluate_policy
 from src.algorithms.multivariate_cem import MultivariateCrossEntropyMethod
 
 

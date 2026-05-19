@@ -14,7 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from configs.config import ABM_CONFIG, ABM_PERTURBATION_TEMPLATE, ENV_CONFIG, RL_CONFIG
-from experiments.experiment2_ablation_comparison.config import Experiment2Config
+from configs.experiment2 import Experiment2Config
 
 
 ARTIFACTS_DIR = PROJECT_ROOT / "phase1_environment_audit" / "artifacts"

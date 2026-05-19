@@ -19,6 +19,7 @@ from configs.config import RL_CONFIG, ENV_CONFIG, PATH_CONFIG
 from src.environment.hotel_env import HotelEnvironment
 from src.agent.hotel_agent_dual_channel import HotelAgentDualChannel
 from src.agent.ota_agent import OTASubsidyHeuristic
+from src.utils.common import compute_bucket_rewards, enrich_bucket_state
 
 def _parse_buckets(spec: Optional[str], n: int) -> List[Tuple[int, int]]:
     if n <= 5:
@@ -168,7 +169,7 @@ def train_game_system(historical_data: pd.DataFrame,
 
         for sid, (s, e) in enumerate(buckets):
             ref_off = int(min(int(e), booking_window_days - 1))
-            st = dict(env._get_state_for_day_offset(ref_off))
+            st = enrich_bucket_state(dict(env.get_raw_state_for_day_offset(ref_off)))
             st['stage_id'] = int(sid)
 
             pob, pof = hotel_agent.select_action(st, deterministic=False)
@@ -193,7 +194,7 @@ def train_game_system(historical_data: pd.DataFrame,
             # 在桶的右端点为新进入该桶的cohort定价。
             for off in entry_offsets:
                 sid = int(bucket_of_offset[off])
-                st = dict(env._get_state_for_day_offset(off))
+                st = enrich_bucket_state(dict(env.get_raw_state_for_day_offset(off)))
                 st['stage_id'] = sid
 
                 pob, pof = hotel_agent.select_action(st, deterministic=False)
@@ -244,9 +245,18 @@ def train_game_system(historical_data: pd.DataFrame,
                 pof = float(price_offline_by_offset[off])
                 sr = float(subsidy_ratio_by_offset[off])
 
-                revenue = hotel_agent.calculate_revenue(bo, bf, pob, pof)
-                profit = ota_agent.calculate_profit(bo, pob, sr)
-                subsidy_cost = bo * pob * RL_CONFIG.commission_rate * sr
+                reward_parts = compute_bucket_rewards(
+                    bookings_online=bo,
+                    bookings_offline=bf,
+                    price_online_base=pob,
+                    price_offline=pof,
+                    commission_rate=RL_CONFIG.commission_rate,
+                    subsidy_ratio=sr,
+                    reward_hotel_ratio=RL_CONFIG.reward_hotel_ratio,
+                )
+                revenue = float(reward_parts["revenue_hotel"])
+                profit = float(reward_parts["profit_ota"])
+                subsidy_cost = float(reward_parts["subsidy_cost"])
 
                 revenue_hotel_day += revenue
                 profit_ota_day += profit
@@ -272,16 +282,20 @@ def train_game_system(historical_data: pd.DataFrame,
                     pof_prev = float(price_offline_by_offset[off])
                     sr_prev = float(subsidy_ratio_by_offset[off])
 
-                    revenue_hotel_acc = bo_acc * pob_prev * (1 - RL_CONFIG.commission_rate) + bf_acc * pof_prev
-                    commission_revenue_acc = bo_acc * pob_prev * RL_CONFIG.commission_rate
-                    subsidy_cost_acc = commission_revenue_acc * sr_prev
-                    profit_ota_acc = commission_revenue_acc - subsidy_cost_acc
-
-                    total_system_profit_acc = revenue_hotel_acc + profit_ota_acc
-                    reward_hotel_acc = RL_CONFIG.reward_hotel_ratio * revenue_hotel_acc + (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit_acc
+                    reward_parts = compute_bucket_rewards(
+                        bookings_online=bo_acc,
+                        bookings_offline=bf_acc,
+                        price_online_base=pob_prev,
+                        price_offline=pof_prev,
+                        commission_rate=RL_CONFIG.commission_rate,
+                        subsidy_ratio=sr_prev,
+                        reward_hotel_ratio=RL_CONFIG.reward_hotel_ratio,
+                    )
+                    reward_hotel_acc = float(reward_parts["reward_hotel"])
+                    subsidy_cost_acc = float(reward_parts["subsidy_cost"])
 
                     state_for_update = dict(decision_state_by_offset[off])
-                    next_state_for_update = dict(env._get_state_for_day_offset(off))
+                    next_state_for_update = dict(env.get_raw_state_for_day_offset(off))
                     next_state_for_update['stage_id'] = int(bucket_of_offset[off])
 
                     if train_hotel:
@@ -335,16 +349,20 @@ def train_game_system(historical_data: pd.DataFrame,
             pof_prev = float(price_offline_by_offset[off])
             sr_prev = float(subsidy_ratio_by_offset[off])
 
-            revenue_hotel_acc = bo_acc * pob_prev * (1 - RL_CONFIG.commission_rate) + bf_acc * pof_prev
-            commission_revenue_acc = bo_acc * pob_prev * RL_CONFIG.commission_rate
-            subsidy_cost_acc = commission_revenue_acc * sr_prev
-            profit_ota_acc = commission_revenue_acc - subsidy_cost_acc
-
-            total_system_profit_acc = revenue_hotel_acc + profit_ota_acc
-            reward_hotel_acc = RL_CONFIG.reward_hotel_ratio * revenue_hotel_acc + (1 - RL_CONFIG.reward_hotel_ratio) * total_system_profit_acc
+            reward_parts = compute_bucket_rewards(
+                bookings_online=bo_acc,
+                bookings_offline=bf_acc,
+                price_online_base=pob_prev,
+                price_offline=pof_prev,
+                commission_rate=RL_CONFIG.commission_rate,
+                subsidy_ratio=sr_prev,
+                reward_hotel_ratio=RL_CONFIG.reward_hotel_ratio,
+            )
+            reward_hotel_acc = float(reward_parts["reward_hotel"])
+            subsidy_cost_acc = float(reward_parts["subsidy_cost"])
 
             state_for_update = dict(decision_state_by_offset[off])
-            next_state_for_update = dict(env._get_state_for_day_offset(off))
+            next_state_for_update = dict(env.get_raw_state_for_day_offset(off))
             next_state_for_update['stage_id'] = int(bucket_of_offset[off])
 
             if train_hotel:

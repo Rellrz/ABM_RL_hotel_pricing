@@ -7,8 +7,14 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from common import build_bucket_mapping, parse_buckets, state_to_144
-from config import Experiment2Config
+from src.utils.common import (
+    build_bucket_mapping,
+    compute_bucket_rewards,
+    discretize_bucket_state,
+    enrich_bucket_state,
+    parse_buckets,
+)
+from configs.experiment2 import Experiment2Config
 from src.agent.ota_agent import OTASubsidyHeuristic
 from src.environment.hotel_env import HotelEnvironment
 
@@ -87,15 +93,15 @@ class BucketPricingSimulator:
     def get_state_by_stage(self, stage_id: int) -> Dict:
         _s, e = self.buckets[stage_id]
         ref_off = min(e, self.config.booking_window_days - 1)
-        st = dict(self.env._get_state_for_day_offset(ref_off))
+        st = enrich_bucket_state(dict(self.env.get_raw_state_for_day_offset(ref_off)))
         st["stage_id"] = int(stage_id)
         return st
 
     def get_q_state_by_stage(self, stage_id: int) -> int:
-        return state_to_144(self.get_state_by_stage(stage_id), stage_id=stage_id)
+        return discretize_bucket_state(self.get_state_by_stage(stage_id), stage_id=stage_id)
 
     def get_obs_vector_for_ppo(self) -> np.ndarray:
-        st = self.env._get_state()
+        st = enrich_bucket_state(self.env.get_raw_state())
         future_inventory = np.asarray(st.get("future_inventory", [self.config.initial_inventory] * self.config.booking_window_days), dtype=np.float64)
         remaining_inventory = float(st.get("inventory_raw", self.config.initial_inventory))
         month = int(((self.day // 30) % 12) + 1)
@@ -125,7 +131,7 @@ class BucketPricingSimulator:
             raise ValueError(f"Expected {self.n_stages} stage actions, got {len(stage_actions)}")
         for sid, (_s, e) in enumerate(self.buckets):
             ref_off = int(min(e, self.config.booking_window_days - 1))
-            st = dict(self.env._get_state_for_day_offset(ref_off))
+            st = dict(self.env.get_raw_state_for_day_offset(ref_off))
             st["stage_id"] = int(sid)
             pon, poff = self._price_clipped(stage_actions[sid])
             sr = float(self.ota.get_subsidy(pon, poff, lead_time=ref_off))
@@ -146,26 +152,26 @@ class BucketPricingSimulator:
         poff = float(self.price_offline_by_offset[off])
         sr = float(self.subsidy_ratio_by_offset[off])
 
-        revenue_hotel = bo_acc * pon * (1.0 - self.config.commission_rate) + bf_acc * poff
-        commission_rev = bo_acc * pon * self.config.commission_rate
-        subsidy_cost = commission_rev * sr
-        profit_ota = commission_rev - subsidy_cost
-        total_system_profit = revenue_hotel + profit_ota
-        reward_hotel = (
-            self.config.reward_hotel_ratio * revenue_hotel
-            + (1.0 - self.config.reward_hotel_ratio) * total_system_profit
+        reward_parts = compute_bucket_rewards(
+            bookings_online=bo_acc,
+            bookings_offline=bf_acc,
+            price_online_base=pon,
+            price_offline=poff,
+            commission_rate=self.config.commission_rate,
+            subsidy_ratio=sr,
+            reward_hotel_ratio=self.config.reward_hotel_ratio,
         )
 
         state_for_update = dict(self.decision_state_by_offset[off])
-        next_state_for_update = dict(self.env._get_state_for_day_offset(off))
+        next_state_for_update = dict(self.env.get_raw_state_for_day_offset(off))
         next_state_for_update["stage_id"] = int(self.bucket_of_offset[off])
         return UpdateEvent(
             state=state_for_update,
             action_pair=(pon, poff),
-            reward=float(reward_hotel),
+            reward=float(reward_parts["reward_hotel"]),
             next_state=next_state_for_update,
             done=bool(done_flag),
-            ota_subsidy=float(subsidy_cost),
+            ota_subsidy=float(reward_parts["subsidy_cost"]),
         )
 
     def _rotate_offsets(self) -> None:
@@ -188,7 +194,7 @@ class BucketPricingSimulator:
         # 在桶的右端点为新进入该桶的cohort重新定价。
         for off in self.entry_offsets:
             sid = int(self.bucket_of_offset[off])
-            st = dict(self.env._get_state_for_day_offset(off))
+            st = dict(self.env.get_raw_state_for_day_offset(off))
             st["stage_id"] = sid
             pon, poff = self._price_clipped(stage_actions[sid])
             sr = float(self.ota.get_subsidy(pon, poff, lead_time=off))
@@ -223,12 +229,19 @@ class BucketPricingSimulator:
             p_on_base = float(self.price_online_base_by_offset[off])
             p_off = float(self.price_offline_by_offset[off])
             sr = float(self.subsidy_ratio_by_offset[off])
-            hotel_gain = bo * p_on_base * (1.0 - self.config.commission_rate) + bf * p_off
-            ota_gain = self.ota.calculate_profit(bo, p_on_base, sr)
-            reward_hotel += hotel_gain
-            reward_ota += ota_gain
-            by_stage_hotel[sid] += hotel_gain
-            by_stage_ota[sid] += ota_gain
+            reward_parts = compute_bucket_rewards(
+                bookings_online=bo,
+                bookings_offline=bf,
+                price_online_base=p_on_base,
+                price_offline=p_off,
+                commission_rate=self.config.commission_rate,
+                subsidy_ratio=sr,
+                reward_hotel_ratio=self.config.reward_hotel_ratio,
+            )
+            reward_hotel += float(reward_parts["revenue_hotel"])
+            reward_ota += float(reward_parts["profit_ota"])
+            by_stage_hotel[sid] += float(reward_parts["revenue_hotel"])
+            by_stage_ota[sid] += float(reward_parts["profit_ota"])
             self.acc_bookings_online_by_offset[off] += int(bo)
             self.acc_bookings_offline_by_offset[off] += int(bf)
 

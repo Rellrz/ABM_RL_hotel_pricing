@@ -18,6 +18,7 @@ from typing import Union, List, Dict, Any, Tuple
 from src.algorithms.cem_nn import NeuralCrossEntropyMethod
 from src.algorithms.multivariate_cem import MultivariateCrossEntropyMethod
 from configs.config import RL_CONFIG
+from src.utils.common import discretize_bucket_state
 
 
 class HotelAgentDualChannel:
@@ -161,34 +162,28 @@ class HotelAgentDualChannel:
         if isinstance(state, (int, np.integer)):
             return int(state)
         
-        # 提取状态特征
         if isinstance(state, dict):
-            # 直接使用环境已经离散化好的inventory_level（0-4）
-            inventory_level = state.get('inventory_level', 4)
-            season = state.get('season', 0) if season is None else season
-            weekday = state.get('weekday', 0) if weekday is None else weekday
-        else:
-            inventory_level = 4
-            season = season if season is not None else 0
-            weekday = weekday if weekday is not None else 0
-        
-        # 库存档位（0-4）：环境已离散化
-        inventory_level = int(np.clip(inventory_level, 0, 4))
-        # 季节（0-2）：淡季、平季、旺季
-        season = int(season)
-        # 日期类型（0-1）：工作日、周末
-        weekday = int(weekday)
-        
-        stage_id = 0
-        if isinstance(state, dict):
-            stage_id = int(state.get('stage_id', 0))
-
-        stage_id = int(np.clip(stage_id, 0, self.n_stages - 1))
-
-        base_state_idx = inventory_level * 6 + season * 2 + weekday
-        state_idx = base_state_idx * self.n_stages + stage_id
-
-        return int(state_idx)
+            stage_id = int(state.get("stage_id", 0))
+            normalized = dict(state)
+            if season is not None:
+                normalized["season"] = int(season)
+            if weekday is not None:
+                normalized["weekday"] = int(weekday)
+            return discretize_bucket_state(
+                normalized,
+                stage_id=stage_id,
+                n_stage_buckets=self.n_stages,
+            )
+        normalized = {
+            "inventory_level": 4,
+            "season": int(season if season is not None else 0),
+            "weekday": int(weekday if weekday is not None else 0),
+        }
+        return discretize_bucket_state(
+            normalized,
+            stage_id=0,
+            n_stage_buckets=self.n_stages,
+        )
     
     def select_action(self, state: Union[Dict, int], deterministic: bool = False) -> np.ndarray:
         """

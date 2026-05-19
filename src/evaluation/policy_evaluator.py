@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List, Tuple
 
-from config import Experiment2Config
-from env_wrappers.base_simulator import BucketPricingSimulator
-from env_wrappers.ppo_env import PPOBucketEnv
+from configs.experiment2 import Experiment2Config
+from src.environment.bucket_pricing_simulator import BucketPricingSimulator
+from src.environment.ppo_bucket_env import PPOBucketEnv
 
 
 StagePolicyFn = Callable[[int, dict], Tuple[float, float]]

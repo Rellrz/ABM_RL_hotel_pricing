@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from config import Experiment2Config
+from configs.experiment2 import Experiment2Config
 from src.algorithms.multivariate_cem import MultivariateCrossEntropyMethod
 
 

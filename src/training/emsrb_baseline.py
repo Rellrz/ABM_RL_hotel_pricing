@@ -11,9 +11,9 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from common import parse_buckets
-from config import Experiment2Config
-from evaluation.evaluator import evaluate_policy
+from src.utils.common import parse_buckets
+from configs.experiment2 import Experiment2Config
+from src.evaluation.policy_evaluator import evaluate_policy
 
 
 @dataclass

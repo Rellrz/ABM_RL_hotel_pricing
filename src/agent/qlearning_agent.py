@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from common import q_epsilon
-from config import Experiment2Config
+from src.utils.common import q_epsilon
+from configs.experiment2 import Experiment2Config
 
 
 class QLearningAgent:

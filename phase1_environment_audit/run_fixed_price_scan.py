@@ -10,13 +10,11 @@ import pandas as pd
 from phase1_utils import FIXED_PRICE_SCAN_DIR, ensure_phase1_dirs, load_city_hotel_data
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-EXP2_DIR = PROJECT_ROOT / "experiments" / "experiment2_ablation_comparison"
-for path in [PROJECT_ROOT, EXP2_DIR]:
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-from experiments.experiment2_ablation_comparison.config import Experiment2Config
-from experiments.experiment2_ablation_comparison.env_wrappers.base_simulator import BucketPricingSimulator
+from configs.experiment2 import Experiment2Config
+from src.environment.bucket_pricing_simulator import BucketPricingSimulator
 
 
 def build_parser() -> argparse.ArgumentParser:

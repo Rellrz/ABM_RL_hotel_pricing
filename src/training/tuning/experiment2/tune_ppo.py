@@ -15,18 +15,18 @@ import pandas as pd
 from optuna.samplers import TPESampler
 from tqdm import tqdm
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 EXPERIMENT_DIR = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 if str(EXPERIMENT_DIR) not in sys.path:
     sys.path.insert(0, str(EXPERIMENT_DIR))
 
-from config import Experiment2Config, TUNING_FIGURES_DIR
-from tuning.objective import summarize_trial
-from tuning.report import generate_tuning_figures
-from tuning.search_space import GLOBAL_BOUNDS, build_refine_bounds, suggest_ppo_params
-from tuning.trial_runner import run_ppo_trial
+from configs.experiment2 import Experiment2Config, TUNING_FIGURES_DIR
+from src.training.tuning.experiment2.objective import summarize_trial
+from src.training.tuning.experiment2.report import generate_tuning_figures
+from src.training.tuning.experiment2.search_space import GLOBAL_BOUNDS, build_refine_bounds, suggest_ppo_params
+from src.training.tuning.experiment2.trial_runner import run_ppo_trial
 
 
 def build_parser() -> argparse.ArgumentParser:

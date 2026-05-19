@@ -9,9 +9,9 @@ from typing import Dict, List
 import numpy as np
 from tqdm import tqdm
 
-from config import Experiment2Config
-from evaluation.evaluator import evaluate_ppo_model
-from env_wrappers.ppo_env import PPOBucketEnv
+from configs.experiment2 import Experiment2Config
+from src.evaluation.policy_evaluator import evaluate_ppo_model
+from src.environment.ppo_bucket_env import PPOBucketEnv
 
 
 def run_ppo(config: Experiment2Config, historical_data) -> tuple[List[Dict], List[Dict]]:
