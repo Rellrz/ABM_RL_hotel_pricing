@@ -87,8 +87,9 @@ class RLConfig:
 
     reward_hotel_ratio: float = 1
     reward_ota_ratio: float = 0
-    reward_shape_price_weight: float = 0.12
-    reward_shape_sellthrough_weight: float = 0.08
+    reward_shape_price_weight: float = 0.30
+    reward_shape_sellthrough_weight: float = 0.22
+    reward_shape_target_sellthrough: float = 0.25
 
     cem_algorithm: str = 'cem'
     cem_n_samples: int = 400

@@ -83,30 +83,40 @@
 ```
 ABM_hotel_pricing/
 ├── configs/
-│   └── config.py                        # 全局配置中心
+│   ├── config.py                        # 兼容入口
+│   ├── schema.py                        # dataclass 配置定义
+│   ├── loader.py                        # 配置装配
+│   └── defaults.py / validators.py      # 默认值与校验
 ├── src/
 │   ├── algorithms/                      # RL算法实现
 │   │   ├── base_algorithm.py            # 算法抽象基类
 │   │   ├── cem.py                       # 一维CEM（兼容保留，用于其他模块）
-│   │   └── cem_nn.py                    # 神经网络版CEM算法
+│   │   ├── cem_nn.py                    # 神经网络版CEM算法
 │   │   └── multivariate_cem.py          # 多元高斯CEM（酒店联合定价核心）
 │   ├── agent/                           # 智能体实现
 │   │   ├── hotel_agent_dual_channel.py  # 双渠道酒店Agent
 │   │   └── ota_agent.py                 # OTA启发式补贴策略
 │   ├── environment/                     # 环境模拟
 │   │   ├── hotel_env.py                 # 酒店RL环境
-│   │   └── abm_customer_model.py        # ABM消费者行为模型
-│   └── training/
-│       └── game_trainer.py              # 博弈训练器（酒店学习 + OTA外生响应）
+│   │   ├── abm_customer_model.py        # ABM消费者行为模型
+│   │   └── bucket_pricing_simulator.py  # 实验二分桶仿真封装
+│   ├── training/
+│   │   ├── game_trainer.py              # 博弈训练器（酒店学习 + OTA外生响应）
+│   │   └── cem_ablation_runner.py       # 实验二 CEM runner
+│   ├── evaluation/                      # 评估与统计
+│   ├── plot/                            # 绘图
 │   └── utils/
+│       ├── common.py                    # 分桶、状态补齐、奖励计算
 │       └── training_monitor.py          # 训练监控与可视化
 ├── experiments/
-│   └── train_game.py                    # 训练入口脚本
+│   ├── train_game.py                    # 主线训练入口
+│   └── experiment2.py                   # 实验二入口
 ├── datasets/
 │   └── hotel_bookings.csv               # 历史预订数据
 └── outputs/
     ├── models/                          # 训练后的模型参数（JSON）
-    ├── results/                         # 训练统计数据（CSV）
+│   ├── results/                         # 主线训练统计（CSV）
+│   ├── experiment2/                     # 实验二结果与图表
     ├── figures/                         # 训练结果可视化图表
     └── tensorboard_logs/                # TensorBoard训练日志
 ```
@@ -114,13 +124,14 @@ ABM_hotel_pricing/
 ### 2.2 核心模块依赖关系
 
 ```
-train_game.py / train_game_ac.py（入口）
-  └── game_trainer.py（训练流程编排）
-        ├── hotel_env.py（RL环境封装）
-        │     └── abm_customer_model.py（消费者行为模拟）
-        ├── hotel_agent_dual_channel.py（酒店决策Agent）
-        │     └── multivariate_cem.py / cem_nn.py（酒店算法实现）
-        └── ota_agent.py（OTA启发式策略）
+train_game.py / experiment2.py（入口）
+  ├── game_trainer.py / experiment2 runners（训练流程编排）
+  ├── hotel_env.py（原始环境状态）
+  │     └── abm_customer_model.py（消费者行为模拟）
+  ├── common.py（分桶、状态补齐、奖励计算）
+  ├── hotel_agent_dual_channel.py（酒店决策Agent）
+  │     └── multivariate_cem.py / cem_nn.py（酒店算法实现）
+  └── ota_agent.py（OTA启发式策略）
 ```
 
 ---
@@ -280,58 +291,73 @@ ABM模型的 `simulate_day()` 方法执行一天的完整模拟：
 
 ### 4.2 状态空间设计
 
-系统采用离散状态空间，由三个维度组合构成：
+当前代码将“环境原始状态”和“策略使用状态”分开管理：
 
-$$\mathcal{S} = \{\text{inventory\_level}\} \times \{\text{season}\} \times \{\text{weekday}\}$$
+- `hotel_env.py` 只输出原始状态，如 `inventory_raw / future_inventory / day / day_offset`
+- `src/utils/common.py` 负责状态补齐与离散化
+- `Q-learning` 保留标量离散状态
+- `CEM` 使用更丰富的 tuple 状态键
 
-#### 4.2.1 库存水平（Inventory Level）
+#### 4.2.1 原始状态（Environment Raw State）
 
-当日入住日（窗口第0天）的剩余库存被离散化为3个等级：
+环境层核心输出包括：
 
-| 等级 | 范围 | 语义 |
-|------|------|------|
-| 0（低库存） | $\text{rooms} \leq \lfloor C / 3 \rfloor$ | 客房紧张，应提价 |
-| 1（中等库存） | $\lfloor C / 3 \rfloor < \text{rooms} \leq \lfloor 2C / 3 \rfloor$ | 库存适中 |
-| 2（高库存） | $\text{rooms} > \lfloor 2C / 3 \rfloor$ | 客房充裕，可降价促销 |
+| 字段 | 含义 |
+|------|------|
+| `inventory_raw` | 当前参考入住日的剩余库存 |
+| `initial_inventory` | 初始库存 |
+| `inventory_ratio` | 当前库存比例 |
+| `future_inventory` | 未来91天库存曲线 |
+| `day` | 当前仿真日 |
+| `day_offset` | 当前轨道相对入住偏移 |
 
-其中 $C$ 为酒店总客房数（默认200间）。
+#### 4.2.2 补齐后的策略状态
 
-#### 4.2.2 季节（Season）
+`common.py::enrich_bucket_state()` 在原始状态基础上补齐：
 
-基于当前仿真天数推算月份，划分为三个季节：
+- `season`
+- `weekday`
+- `inventory_level`
+- `bucket_inv_ratio / near_inv_ratio / far_inv_ratio`
+- `bucket_inv_bin / near_inv_bin / far_inv_bin`
+- `inv_slope / inv_slope_bin`
 
-| 等级 | 月份 | 语义 |
-|------|------|------|
-| 0（淡季） | 11月、12月、1月、2月 | 需求低迷 |
-| 1（平季） | 3月-5月、9月-10月 | 需求中等 |
-| 2（旺季） | 6月、7月、8月 | 需求旺盛 |
+其中库存离散采用5档，默认阈值为 `0.2 / 0.4 / 0.6 / 0.8`。
 
-月份计算公式：$m = (\lfloor \text{day} / 30 \rfloor \mod 12) + 1$
+#### 4.2.3 Q-learning 的离散状态
 
-#### 4.2.3 日期类型（Weekday/Weekend）
+Q-learning 仍使用标量状态索引：
 
-| 等级 | 条件 | 语义 |
-|------|------|------|
-| 0（工作日） | $\text{day} \mod 7 \notin \{5, 6\}$ | 周一至周四 |
-| 1（周末） | $\text{day} \mod 7 \in \{5, 6\}$ | 周五至周日 |
+$$
+\mathcal{S}_{Q}=\{\text{inventory\_level}\}\times\{\text{season}\}\times\{\text{weekday}\}\times\{\text{stage\_id}\}
+$$
 
-#### 4.2.4 状态编码
+其中：
 
-三个维度组合为标量索引：
+- `inventory_level`: 5档
+- `season`: 3档
+- `weekday`: 2档
+- `stage_id`: 8档
 
-$$\text{state\_idx} = \text{inventory\_level} \times 6 + \text{season} \times 2 + \text{weekday}$$
+因此总状态数为：
 
-**基础状态空间大小**：$3 \times 3 \times 2 = 18$ 种状态。
+$$5 \times 3 \times 2 \times 8 = 240$$
 
-#### 4.2.5 决策阶段扩展
+#### 4.2.4 CEM 的状态键
 
-在博弈训练中，91天的预订窗口被划分为多个**决策桶**（Decision Buckets），每个桶对应一个决策阶段。例如默认配置 `"0|1|2-3|4-6|7-13|14-29|30-59|60-90"` 将窗口划分为8个阶段。
+当前主线 `CEM` 不再强制使用单整数状态，而是使用更丰富的 tuple key：
 
-扩展后的状态索引：
+$$
+s_{\text{CEM}}=(\text{stage\_id}, \text{season}, \text{weekday}, \text{bucket\_inv\_bin}, \text{near\_inv\_bin}, \text{far\_inv\_bin}, \text{inv\_slope\_bin})
+$$
 
-$$\text{state\_idx\_extended} = \text{base\_state\_idx} \times K + \text{stage\_id}$$
+该设计的目的不是压缩成一个固定大小的有限表，而是显式利用：
 
-其中 $K$ 为决策阶段数量。**酒店Agent总状态空间**：$18 \times K$ 种状态。
+- 当前 bucket 的库存紧张度
+- 近端与远端库存形状差异
+- 决策阶段位置
+
+因此，`CEM` 的有效状态数量由训练访问到的状态组合决定，不再简单等于 `18 x K` 或 `30 x K`。
 
 ### 4.3 动作空间设计（联合动作）
 
@@ -339,8 +365,8 @@ $$\text{state\_idx\_extended} = \text{base\_state\_idx} \times K + \text{stage\_
 
 | 动作维度 | 范围 | 说明 |
 |----------|------|------|
-| $P_{\text{online\_base}}$ | [80, 180] 元 | 给OTA的线上基础价格 |
-| $P_{\text{offline}}$ | [80, 180] 元 | 线下直销价格 |
+| $P_{\text{online\_base}}$ | [50, 150] 元 | 给OTA的线上基础价格 |
+| $P_{\text{offline}}$ | [50, 150] 元 | 线下直销价格 |
 
 在 `cem` 模式下，动作采样来自二维高斯分布：
 
@@ -605,15 +631,39 @@ $$\Pi_{\text{OTA}}^{\text{raw}} = B_{\text{online}} \times P_{\text{online\_base
 
 $$\Pi_{\text{system}} = R_{\text{hotel}}^{\text{raw}} + \Pi_{\text{OTA}}^{\text{raw}}$$
 
-### 7.2 酒店混合奖励机制（当前生效）
+### 7.2 酒店训练奖励（当前生效）
 
-当前版本仅酒店Agent学习，因此混合奖励仅用于酒店更新：
+当前主线中 `reward_hotel_ratio = 1`，因此酒店的基础训练奖励等于酒店原始收益：
 
-$$\text{Reward}_{\text{hotel}} = \alpha \times R_{\text{hotel}}^{\text{raw}} + (1 - \alpha) \times \Pi_{\text{system}}$$
+$$
+\text{BaseReward}_{\text{hotel}} = R_{\text{hotel}}^{\text{raw}}
+$$
 
-其中 $\alpha$（`reward_hotel_ratio`）控制“酒店个体收益”与“系统总收益”的权衡。
+在此基础上，再叠加轻量的机会成本惩罚（reward shaping）：
 
-OTA不接收学习奖励，仅按启发式规则输出补贴并统计利润。
+$$
+\text{Reward}_{\text{hotel}}=\max \left(0,\ \text{BaseReward}_{\text{hotel}}-\text{Penalty}_{\text{price}}-\text{Penalty}_{\text{sellthrough}}\right)
+$$
+
+其中惩罚项由 `src/utils/common.py::compute_reward_shaping()` 计算，核心包含：
+
+- `pressure`：库存压力，由 `bucket_inv_ratio` 与 `near/far` 库存差共同决定
+- `low_price_signal`：价格越接近下界，该信号越高
+- `sellthrough_excess`：卖得超过目标节奏 `target_sellthrough` 的部分
+
+具体形式为：
+
+$$
+\text{Penalty}_{\text{price}} \propto w_p \cdot \text{pressure}^{1.4}\cdot \text{low\_price\_signal}^{1.25}
+$$
+
+$$
+\text{Penalty}_{\text{sellthrough}} \propto w_s \cdot \text{pressure}^{1.2}\cdot \text{sellthrough\_excess}^{1.15}
+$$
+
+其设计意图是：在库存稀缺时，对“低价快卖”施加明确的机会成本，从而更容易改变 `CEM` 的 elite 排序。
+
+OTA 不接收学习奖励，仅按启发式规则输出补贴并统计利润。
 
 ### 7.3 奖励的时间聚合
 
@@ -624,7 +674,11 @@ OTA不接收学习奖励，仅按启发式规则输出补贴并统计利润。
   reward_k = 该桶内所有日期偏移的累计预订产生的总奖励
 ```
 
-这意味着酒店Agent看到的是一段时间内（桶跨度）策略执行的累计效果，有助于减少噪声和稳定学习。
+这意味着酒店Agent看到的是一段时间内（桶跨度）策略执行的累计效果。当前日志中会同时记录：
+
+- `TrainBase`：shaping 前的基础训练奖励
+- `TrainShaped`：实际送入 `CEM.update()` 的训练奖励
+- `ShapePenalty`：平均惩罚比例
 
 ---
 
@@ -701,23 +755,23 @@ OTA不接收学习奖励，仅按启发式规则输出补贴并统计利润。
 
 | 参数 | 值 | 说明 |
 |------|----|----|
-| `initial_inventory` | 200 | 酒店总客房数 |
+| `initial_inventory` | 70 | 酒店总客房数 |
 | `booking_window_days` | 91 | 预订窗口长度（含当天） |
-| `episode_days` | 365 | 每个episode模拟天数 |
+| `episode_days` | 730 | 每个episode模拟天数 |
 | `cost_per_room` | 20 | 每间客房成本 |
 
 ### 10.2 博弈系统参数（当前主线）
 
 | 参数                    | 值            | 说明        |
 | --------------------- | ------------ | --------- |
-| `commission_rate`     | 0.30         | OTA佣金率    |
+| `commission_rate`     | 0.20         | OTA佣金率    |
 | `subsidy_ratio_max`   | 0.8          | OTA最高补贴比例 |
 | `ota_delta_max`       | 15.0         | OTA目标价差上限 |
 | `ota_decay_lambda`    | 0.05         | 提前期衰减系数 |
 | `ota_noise_std`       | 0.05         | 补贴噪声标准差 |
 | `ota_seed`            | 42           | OTA随机种子 |
-| `online_price_range`  | [80, 180]    | 线上基础价格范围  |
-| `offline_price_range` | [80, 180]    | 线下价格范围    |
+| `online_price_range`  | [50, 150]    | 线上基础价格范围  |
+| `offline_price_range` | [50, 150]    | 线下价格范围    |
 | `training_mode`       | simultaneous | 默认同步训练    |
 
 ### 10.3 ABM消费者参数
@@ -726,8 +780,8 @@ OTA不接收学习奖励，仅按启发式规则输出补贴并统计利润。
 | -------------------------------- | ---------- | ----------- |
 | `urgency_weight` $\gamma$        | 20         | 紧迫性权重       |
 | `booking_threshold` $\theta$     | -15        | 预订效用阈值      |
-| `customer_type_ratio`            | (0.3, 0.7) | 线上/线下消费者比例  |
-| `online_discount_ratio` $\delta$ | 0.8        | 线上渠道WTP折扣系数 |
+| `customer_type_ratio`            | (0.7, 0.3) | (online_only, omnichannel) |
+| `online_discount_ratio` $\delta$ | 0.95       | 线上渠道WTP折扣系数 |
 | `noise_std`                      | 12.0       | 效用噪声标准差     |
 
 ### 10.4 酒店CEM参数
@@ -735,20 +789,23 @@ OTA不接收学习奖励，仅按启发式规则输出补贴并统计利润。
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `cem_algorithm` | `cem` | `cem`为多元高斯版，`cem_nn`为神经网络版 |
-| `cem_n_samples` | 100 | 采样数量 |
+| `cem_n_samples` | 400 | 采样数量 |
 | `cem_elite_frac` | 0.3 | 精英比例 |
-| `initial_std` | 20.0 | 初始探索标准差 |
-| `min_std` | 5.0 | 最小探索标准差 |
+| `initial_std` | 50.0 | 初始探索标准差 |
+| `min_std` | 3.0 | 最小探索标准差 |
 | `std_decay` | 0.999 | 探索衰减系数 |
 
 ### 10.5 训练参数
 
 | 参数                   | 默认值                                         | 说明             |
 | -------------------- | ------------------------------------------- | -------------- |
-| `episodes`           | 200                                         | 训练总轮数          |
+| `episodes`           | 250（配置默认）/ 50（CLI默认）                      | 训练总轮数          |
 | `update_frequency`   | 30                                          | CEM分布更新频率（每N天） |
 | `decision_buckets`   | `0\|1\|2-3\|4-6\|7-13\|14-29\|30-59\|60-90` | 提前期分桶配置        |
-| `reward_hotel_ratio` | 0.0                                         | 酒店个体收益权重       |
+| `reward_hotel_ratio` | 1.0                                         | 酒店个体收益权重       |
+| `reward_shape_price_weight` | 0.30                                | 低价出清惩罚强度      |
+| `reward_shape_sellthrough_weight` | 0.22                          | 过快售出惩罚强度      |
+| `reward_shape_target_sellthrough` | 0.25                          | 节奏惩罚阈值         |
 
 ---
 
@@ -848,24 +905,29 @@ OTA在当前版本不使用CEM，采用启发式外生规则：
 
 ### 12.3 决策桶的设计意义
 
-91天逐日定价会产生 $91 \times 18 = 1638$ 个状态-动作对（不含阶段扩展），CEM需要大量样本才能收敛。通过将91天聚合为8个决策桶：
-- 减少了状态空间（$8 \times 18 = 144$ 个状态-动作对）
-- 符合酒店定价实践（近期精细调价，远期粗略定价）
-- 保证了每个状态有足够的经验样本进行CEM更新
+决策桶仍然是当前系统的关键设计，但其作用已经从“简单压缩固定状态表”扩展为：
+- 为滚动窗口中的不同 lead time 轨道提供稳定的阶段边界
+- 支持 `Q-learning` 的 `240` 个离散状态
+- 为 `CEM` 的 richer tuple state 提供 `stage_id / bucket_start / bucket_end` 上下文
 
-### 12.4 混合奖励的意义（当前主要作用于酒店）
+因此，分桶的意义不仅是减少状态数量，更重要的是让价格更新频率与 lead time 结构对齐。
 
-混合奖励机制（$\alpha$ 参数）对应社会福利函数设计：
-- $\alpha = 1$：酒店完全自利
-- $\alpha = 0$：酒店偏向系统总收益
-- $0 < \alpha < 1$：平衡个体收益与系统收益
+### 12.4 当前奖励设计的意义
 
-OTA为外生策略，不参与该奖励更新。
+当前主线不再强调“酒店/系统混合奖励”，而是采用：
+
+- **主目标**：酒店收益最大化（`reward_hotel_ratio = 1`）
+- **辅助约束**：在库存稀缺时，对低价和过快售出施加轻量机会成本惩罚
+
+其优点是：
+- 与最终评估指标一致
+- 保持业务可解释性
+- 更适合 `CEM` 这种基于样本排序的优化方法
 
 ---
 
-> **文档版本**: v2.0
+> **文档版本**: v2.1
 >
-> **最后更新**: 2026年4月10日
+> **最后更新**: 2026年5月20日
 >
-> **适用代码版本**: 酒店多元CEM/CEM-NN + OTA启发式补贴版本
+> **适用代码版本**: 酒店多元CEM/CEM-NN + OTA启发式补贴 + richer state + reward shaping 版本

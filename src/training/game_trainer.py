@@ -308,6 +308,7 @@ def train_game_system(historical_data: pd.DataFrame,
                         offline_price_max=RL_CONFIG.offline_price_max,
                         reward_shape_price_weight=RL_CONFIG.reward_shape_price_weight,
                         reward_shape_sellthrough_weight=RL_CONFIG.reward_shape_sellthrough_weight,
+                        reward_shape_target_sellthrough=RL_CONFIG.reward_shape_target_sellthrough,
                     )
                     reward_hotel_acc = float(reward_parts["reward_hotel"])
                     base_reward_hotel_acc = float(reward_parts["base_reward_hotel"])
@@ -388,6 +389,7 @@ def train_game_system(historical_data: pd.DataFrame,
                 offline_price_max=RL_CONFIG.offline_price_max,
                 reward_shape_price_weight=RL_CONFIG.reward_shape_price_weight,
                 reward_shape_sellthrough_weight=RL_CONFIG.reward_shape_sellthrough_weight,
+                reward_shape_target_sellthrough=RL_CONFIG.reward_shape_target_sellthrough,
             )
             reward_hotel_acc = float(reward_parts["reward_hotel"])
             base_reward_hotel_acc = float(reward_parts["base_reward_hotel"])

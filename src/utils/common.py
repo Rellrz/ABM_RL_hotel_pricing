@@ -226,6 +226,7 @@ def build_cem_state_key(state: Dict, stage_id: int | None = None) -> Tuple[int, 
 
 def compute_reward_shaping(
     state: Dict | None,
+    base_reward_hotel: float,
     bookings_online: int,
     bookings_offline: int,
     price_online_base: float,
@@ -236,17 +237,23 @@ def compute_reward_shaping(
     offline_price_max: float,
     price_weight: float,
     sellthrough_weight: float,
+    target_sellthrough: float,
 ) -> Dict[str, float]:
-    """轻量 reward shaping：仅对训练奖励做小幅引导，不改变经济收益口径。"""
+    """V2 reward shaping：加性机会成本惩罚，用于改变 CEM 样本排序。"""
     if state is None or (price_weight <= 0.0 and sellthrough_weight <= 0.0):
         return {
-            "reward_multiplier": 1.0,
             "pressure": 0.0,
-            "price_discount": 0.0,
+            "low_price_signal": 0.0,
             "sellthrough": 0.0,
+            "sellthrough_excess": 0.0,
+            "price_penalty_ratio": 0.0,
+            "sellthrough_penalty_ratio": 0.0,
+            "shaping_penalty_ratio": 0.0,
             "price_penalty": 0.0,
             "sellthrough_penalty": 0.0,
             "shaping_penalty": 0.0,
+            "shaping_penalty_amount": 0.0,
+            "reward_multiplier": 1.0,
         }
 
     norm = enrich_bucket_state(state)
@@ -263,24 +270,37 @@ def compute_reward_shaping(
     on_pos = float(np.clip((price_online_base - online_price_min) / on_span, 0.0, 1.0))
     off_pos = float(np.clip((price_offline - offline_price_min) / off_span, 0.0, 1.0))
     avg_price_pos = 0.5 * (on_pos + off_pos)
-    price_discount = float(np.clip(1.0 - avg_price_pos, 0.0, 1.0))
+    low_price_signal = float(np.clip(1.0 - avg_price_pos, 0.0, 1.0))
 
     inventory_ref = float(max(1.0, norm.get("inventory_raw", norm.get("initial_inventory", 1.0))))
     sellthrough = float(np.clip((int(bookings_online) + int(bookings_offline)) / inventory_ref, 0.0, 1.0))
+    sellthrough_excess = float(max(0.0, sellthrough - float(np.clip(target_sellthrough, 0.0, 1.0))))
 
-    price_penalty = float(max(0.0, price_weight) * pressure * price_discount)
-    sellthrough_penalty = float(max(0.0, sellthrough_weight) * pressure * max(0.0, sellthrough - 0.35))
-    shaping_penalty = float(np.clip(price_penalty + sellthrough_penalty, 0.0, 0.30))
-    reward_multiplier = float(1.0 - shaping_penalty)
+    # 非线性放大高压低价、过快售出的坏样本，提升对 CEM 排序的影响力。
+    price_penalty_ratio = float(max(0.0, price_weight) * (pressure ** 1.4) * (low_price_signal ** 1.25))
+    sellthrough_penalty_ratio = float(
+        max(0.0, sellthrough_weight) * (pressure ** 1.2) * (sellthrough_excess ** 1.15)
+    )
+    shaping_penalty_ratio = float(np.clip(price_penalty_ratio + sellthrough_penalty_ratio, 0.0, 0.45))
+    scale = float(max(1.0, base_reward_hotel))
+    price_penalty = float(scale * price_penalty_ratio)
+    sellthrough_penalty = float(scale * sellthrough_penalty_ratio)
+    shaping_penalty_amount = float(scale * shaping_penalty_ratio)
+    reward_multiplier = float(max(0.0, 1.0 - shaping_penalty_ratio))
 
     return {
-        "reward_multiplier": reward_multiplier,
         "pressure": pressure,
-        "price_discount": price_discount,
+        "low_price_signal": low_price_signal,
         "sellthrough": sellthrough,
+        "sellthrough_excess": sellthrough_excess,
+        "price_penalty_ratio": price_penalty_ratio,
+        "sellthrough_penalty_ratio": sellthrough_penalty_ratio,
+        "shaping_penalty_ratio": shaping_penalty_ratio,
         "price_penalty": price_penalty,
         "sellthrough_penalty": sellthrough_penalty,
-        "shaping_penalty": shaping_penalty,
+        "shaping_penalty": shaping_penalty_ratio,
+        "shaping_penalty_amount": shaping_penalty_amount,
+        "reward_multiplier": reward_multiplier,
     }
 
 
@@ -299,6 +319,7 @@ def compute_bucket_rewards(
     offline_price_max: float | None = None,
     reward_shape_price_weight: float = 0.0,
     reward_shape_sellthrough_weight: float = 0.0,
+    reward_shape_target_sellthrough: float = 0.30,
 ) -> Dict[str, float]:
     """统一CEM奖励口径：酒店收益、OTA利润、系统收益与训练奖励。"""
     bo = int(max(0, bookings_online))
@@ -318,6 +339,7 @@ def compute_bucket_rewards(
 
     shaping_parts = compute_reward_shaping(
         state=state,
+        base_reward_hotel=base_reward_hotel,
         bookings_online=bo,
         bookings_offline=bf,
         price_online_base=pon,
@@ -328,8 +350,9 @@ def compute_bucket_rewards(
         offline_price_max=float(poff if offline_price_max is None else offline_price_max),
         price_weight=float(reward_shape_price_weight),
         sellthrough_weight=float(reward_shape_sellthrough_weight),
+        target_sellthrough=float(reward_shape_target_sellthrough),
     )
-    reward_hotel = float(base_reward_hotel * shaping_parts["reward_multiplier"])
+    reward_hotel = float(max(0.0, base_reward_hotel - shaping_parts["shaping_penalty_amount"]))
 
     return {
         "revenue_hotel": float(revenue_hotel),

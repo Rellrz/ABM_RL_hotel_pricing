@@ -172,6 +172,7 @@ class BucketPricingSimulator:
             offline_price_max=self.config.offline_price_max,
             reward_shape_price_weight=self.config.reward_shape_price_weight,
             reward_shape_sellthrough_weight=self.config.reward_shape_sellthrough_weight,
+            reward_shape_target_sellthrough=self.config.reward_shape_target_sellthrough,
         )
 
         state_for_update = enrich_bucket_state(dict(self.decision_state_by_offset[off]))

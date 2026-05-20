@@ -48,6 +48,7 @@ class Experiment2Config:
     reward_hotel_ratio: float = float(RL_CONFIG.reward_hotel_ratio)
     reward_shape_price_weight: float = float(RL_CONFIG.reward_shape_price_weight)
     reward_shape_sellthrough_weight: float = float(RL_CONFIG.reward_shape_sellthrough_weight)
+    reward_shape_target_sellthrough: float = float(RL_CONFIG.reward_shape_target_sellthrough)
     online_price_min: float = float(RL_CONFIG.online_price_min)
     online_price_max: float = float(RL_CONFIG.online_price_max)
     offline_price_min: float = float(RL_CONFIG.offline_price_min)
