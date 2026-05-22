@@ -15,7 +15,7 @@
 pip install -r requirements.txt
 
 # 2) 跑实验二（debug）
-python experiments/experiment2_ablation_comparison/main.py --mode debug
+python experiments/experiment2.py --mode debug
 ```
 
 ## 主要目录
@@ -29,14 +29,17 @@ ABM_hotel_pricing/
 │   ├── loader.py                    # 运行时装配
 │   └── validators.py                # 配置校验
 ├── src/
-│   ├── environment/                 # ABM + 环境
+│   ├── environment/                 # ABM + 环境封装
 │   ├── agent/                       # 酒店/OTA智能体
 │   ├── algorithms/                  # CEM/CEM-NN/Multivariate CEM
-│   └── training/                    # 主训练器
+│   ├── training/                    # 主训练器与实验runner
+│   ├── evaluation/                  # 评估与统计
+│   ├── plot/                        # 绘图
+│   └── utils/                       # 通用工具（分桶、状态、奖励）
 ├── experiments/
 │   ├── train_game.py                # 主线训练入口
-│   └── experiment2_ablation_comparison/   # 实验二（对比/消融）
-└── outputs/ / artifacts/            # 结果与图表
+│   └── experiment2.py               # 实验二（对比/消融）入口
+└── outputs/                         # 模型、日志、图表与实验结果
 ```
 
 ## 配置与扰动模板
@@ -59,9 +62,9 @@ ABM_PERTURBATION_TEMPLATE = 'none'  # none / mild / medium / stress
 ### 1) 主线训练
 ```bash
 python experiments/train_game.py \
-  --episodes 500 \
+  --episodes 400 \
   --mode simultaneous \
-  --commission 0.15 \
+  --commission 0.20 \
   --subsidy-ratio-max 0.8 \
   --update-frequency 30 \
   --booking-window-days 91 \
@@ -71,11 +74,11 @@ python experiments/train_game.py \
 ### 2) 实验二：对比与消融
 ```bash
 # debug
-python experiments/experiment2_ablation_comparison/main.py --mode debug
+python experiments/experiment2.py --mode debug
 
 # medium/full
-python experiments/experiment2_ablation_comparison/main.py --mode medium --n-jobs 4
-python experiments/experiment2_ablation_comparison/main.py --mode full --n-jobs 8
+python experiments/experiment2.py --mode medium --n-jobs 4
+python experiments/experiment2.py --mode full --n-jobs 8
 ```
 
 常用选项：
@@ -87,21 +90,28 @@ python experiments/experiment2_ablation_comparison/main.py --mode full --n-jobs 
 ## 结果输出
 
 ### 实验二结果
-- `artifacts/results/experiment2_training.csv`
-- `artifacts/results/experiment2_post_eval.csv`
-- `artifacts/results/performance_table_*.csv`
-- `artifacts/results/experiment2_stats_*.csv`
-- `artifacts/results/experiment2_summary.json`
+- `outputs/experiment2/results/experiment2_training.csv`
+- `outputs/experiment2/results/experiment2_post_eval.csv`
+- `outputs/experiment2/results/performance_table_*.csv`
+- `outputs/experiment2/results/experiment2_stats_*.csv`
+- `outputs/experiment2/results/experiment2_summary.json`
 
 ### 实验二图表
-- `artifacts/figures/episode_revenue_curves_hotel.pdf`
-- `artifacts/figures/episode_profit_curves_ota.pdf`
-- `artifacts/figures/episode_total_profit_curves_system.pdf`
-- `artifacts/figures/post_eval_bar_*_with_errorbars.pdf`
+- `outputs/experiment2/figures/episode_revenue_curves_hotel.pdf`
+- `outputs/experiment2/figures/episode_profit_curves_ota.pdf`
+- `outputs/experiment2/figures/episode_total_profit_curves_system.pdf`
+- `outputs/experiment2/figures/post_eval_bar_*_with_errorbars.pdf`
 
 ### 训练模型与日志
 - `outputs/models/*.json`
+- `outputs/models/training_data_*.csv`
 - `outputs/tensorboard_logs/`
+
+### 主线训练说明
+- `hotel_env` 负责输出原始状态；状态补齐、分桶映射和奖励计算统一放在 `src/utils/common.py`
+- `CEM` 当前使用更丰富的状态键：`(stage_id, season, weekday, bucket_inv_bin, near_inv_bin, far_inv_bin, inv_slope_bin)`
+- `Q-learning` 仍保留 `240` 个离散状态（`5 x 3 x 2 x 8`）
+- 当前主线奖励为“酒店收益主目标 + 轻量机会成本惩罚”，训练日志中可同时看到 `TrainBase / TrainShaped / ShapePenalty`
 
 TensorBoard：
 ```bash
@@ -115,8 +125,10 @@ tensorboard --logdir=outputs/tensorboard_logs
 - `扰动`：支持需求 OU+跳跃、WTP 漂移、渠道偏好扰动、效用噪声。
 
 ## 开发说明
-- 配置拆分后，建议新代码使用 `from configs import ...` 或 `from configs.schema import ...`。
-- 旧代码仍可使用 `from configs.config import ...`（兼容层保留）。
+- 配置拆分后，建议新代码使用 `from configs import ...` 或 `from configs.schema import ...`
+- 旧代码仍可使用 `from configs.config import ...`（兼容层保留）
+- 实验二不再维护独立实现目录；`experiments/experiment2.py` 直接调用 `src/` 下模块
+- 与状态/奖励相关的改动优先集中到 `src/utils/common.py`
 
 ## 许可证
 如需开源发布，请在仓库补充 `LICENSE` 文件并在本 README 标注许可类型。
