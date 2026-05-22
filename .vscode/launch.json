@@ -17,7 +17,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/experiments/train_game.py",
-            "args": ["--episodes", "10"],
+            "args": ["--episodes", "50"],
             "console": "integratedTerminal"
         },
         {
@@ -33,6 +33,14 @@
             "name": "JavaScript 调试终端",
             "request": "launch",
             "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Debugger experiment_PPO",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/experiments/experiment2_ablation_comparison/main.py",
+            "args": ["--mode", "debug","--skip-emsrb","--skip-cem","--skip-qlearning"],
+            "console": "integratedTerminal"
         }
     ]
 }

@@ -312,6 +312,8 @@ def compute_bucket_rewards(
     commission_rate: float,
     subsidy_ratio: float,
     reward_hotel_ratio: float,
+    revenue_online: float | None = None,
+    revenue_offline: float | None = None,
     state: Dict | None = None,
     online_price_min: float | None = None,
     online_price_max: float | None = None,
@@ -330,7 +332,9 @@ def compute_bucket_rewards(
     sr = float(np.clip(subsidy_ratio, 0.0, 1.0))
     r_h = float(np.clip(reward_hotel_ratio, 0.0, 1.0))
 
-    revenue_hotel = bo * pon * (1.0 - c) + bf * poff
+    revenue_online_hotel = float(bo * pon * (1.0 - c) if revenue_online is None else revenue_online)
+    revenue_offline_hotel = float(bf * poff if revenue_offline is None else revenue_offline)
+    revenue_hotel = revenue_online_hotel + revenue_offline_hotel
     commission_revenue = bo * pon * c
     subsidy_cost = commission_revenue * sr
     profit_ota = commission_revenue - subsidy_cost

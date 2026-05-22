@@ -179,6 +179,8 @@ def train_game_system(historical_data: pd.DataFrame,
         decision_state_by_offset = [None] * booking_window_days
         acc_bookings_online_by_offset = [0] * booking_window_days
         acc_bookings_offline_by_offset = [0] * booking_window_days
+        acc_revenue_online_by_offset = [0.0] * booking_window_days
+        acc_revenue_offline_by_offset = [0.0] * booking_window_days
 
         for sid, (s, e) in enumerate(buckets):
             ref_off = int(min(int(e), booking_window_days - 1))
@@ -222,6 +224,8 @@ def train_game_system(historical_data: pd.DataFrame,
 
                 acc_bookings_online_by_offset[off] = 0
                 acc_bookings_offline_by_offset[off] = 0
+                acc_revenue_online_by_offset[off] = 0.0
+                acc_revenue_offline_by_offset[off] = 0.0
                 price_online_base_by_offset[off] = float(pob)
                 price_offline_by_offset[off] = float(pof)
                 subsidy_ratio_by_offset[off] = float(sr)
@@ -236,7 +240,10 @@ def train_game_system(historical_data: pd.DataFrame,
                 for i in range(booking_window_days)
             ]
 
-            actions_window = [[price_online_final_window[i], price_offline_by_offset[i]] for i in range(booking_window_days)]
+            actions_window = [
+                [price_online_final_window[i], price_offline_by_offset[i], price_online_base_by_offset[i]]
+                for i in range(booking_window_days)
+            ]
             _, _, done, info = env.step(actions_window)
 
             bookings_by_day_offset = info.get('bookings_by_day_offset', [])
@@ -255,6 +262,8 @@ def train_game_system(historical_data: pd.DataFrame,
                 pob = float(price_online_base_by_offset[off])
                 pof = float(price_offline_by_offset[off])
                 sr = float(subsidy_ratio_by_offset[off])
+                revenue_online = float(bookings_by_day_offset[off].get('revenue_online', 0.0))
+                revenue_offline = float(bookings_by_day_offset[off].get('revenue_offline', 0.0))
 
                 reward_parts = compute_bucket_rewards(
                     bookings_online=bo,
@@ -264,6 +273,8 @@ def train_game_system(historical_data: pd.DataFrame,
                     commission_rate=RL_CONFIG.commission_rate,
                     subsidy_ratio=sr,
                     reward_hotel_ratio=RL_CONFIG.reward_hotel_ratio,
+                    revenue_online=revenue_online,
+                    revenue_offline=revenue_offline,
                 )
                 revenue = float(reward_parts["revenue_hotel"])
                 profit = float(reward_parts["profit_ota"])
@@ -274,6 +285,8 @@ def train_game_system(historical_data: pd.DataFrame,
                 actual_subsidy_amount_day += subsidy_cost
                 acc_bookings_online_by_offset[off] += int(bo)
                 acc_bookings_offline_by_offset[off] += int(bf)
+                acc_revenue_online_by_offset[off] += revenue_online
+                acc_revenue_offline_by_offset[off] += revenue_offline
 
             total_bookings_online_day = info.get('new_bookings_online', 0)
             total_bookings_offline_day = info.get('new_bookings_offline', 0)
@@ -301,6 +314,8 @@ def train_game_system(historical_data: pd.DataFrame,
                         commission_rate=RL_CONFIG.commission_rate,
                         subsidy_ratio=sr_prev,
                         reward_hotel_ratio=RL_CONFIG.reward_hotel_ratio,
+                        revenue_online=float(acc_revenue_online_by_offset[off]),
+                        revenue_offline=float(acc_revenue_offline_by_offset[off]),
                         state=decision_state_by_offset[off],
                         online_price_min=RL_CONFIG.online_price_min,
                         online_price_max=RL_CONFIG.online_price_max,
@@ -335,6 +350,8 @@ def train_game_system(historical_data: pd.DataFrame,
 
                 acc_bookings_online_by_offset[off] = 0
                 acc_bookings_offline_by_offset[off] = 0
+                acc_revenue_online_by_offset[off] = 0.0
+                acc_revenue_offline_by_offset[off] = 0.0
                 decision_state_by_offset[off] = None
 
             last_subsidy_ratio = subsidy_ratio_by_offset[0] if subsidy_ratio_by_offset else 0.0
@@ -363,6 +380,8 @@ def train_game_system(historical_data: pd.DataFrame,
             decision_state_by_offset = decision_state_by_offset[1:] + [decision_state_by_offset[-1]]
             acc_bookings_online_by_offset = acc_bookings_online_by_offset[1:] + [acc_bookings_online_by_offset[-1]]
             acc_bookings_offline_by_offset = acc_bookings_offline_by_offset[1:] + [acc_bookings_offline_by_offset[-1]]
+            acc_revenue_online_by_offset = acc_revenue_online_by_offset[1:] + [acc_revenue_online_by_offset[-1]]
+            acc_revenue_offline_by_offset = acc_revenue_offline_by_offset[1:] + [acc_revenue_offline_by_offset[-1]]
         
         for off in range(booking_window_days):
             bo_acc = int(acc_bookings_online_by_offset[off])
@@ -382,6 +401,8 @@ def train_game_system(historical_data: pd.DataFrame,
                 commission_rate=RL_CONFIG.commission_rate,
                 subsidy_ratio=sr_prev,
                 reward_hotel_ratio=RL_CONFIG.reward_hotel_ratio,
+                revenue_online=float(acc_revenue_online_by_offset[off]),
+                revenue_offline=float(acc_revenue_offline_by_offset[off]),
                 state=decision_state_by_offset[off],
                 online_price_min=RL_CONFIG.online_price_min,
                 online_price_max=RL_CONFIG.online_price_max,
@@ -445,7 +466,7 @@ def train_game_system(historical_data: pd.DataFrame,
         writer.add_scalar('Reward/Total_Revenue', total_reward_hotel + total_reward_ota, episode)
         writer.add_scalar('Reward/Train_Base_Hotel_Reward', total_train_base_reward_hotel, episode)
         writer.add_scalar('Reward/Train_Shaped_Hotel_Reward', total_train_shaped_reward_hotel, episode)
-        writer.add_scalar('Reward/Train_Avg_Shaping_Penalty', total_train_shaping_penalty / max(1, total_train_shaping_updates), episode)
+        writer.add_scalar('Reward/Train_Avg_Shaping_Penalty_Ratio', total_train_shaping_penalty / max(1, total_train_shaping_updates), episode)
         writer.add_scalar('Bookings/Online', total_bookings_online, episode)
         writer.add_scalar('Bookings/Offline', total_bookings_offline, episode)
         writer.add_scalar('Bookings/Total', total_bookings_online + total_bookings_offline, episode)
@@ -473,8 +494,8 @@ def train_game_system(historical_data: pd.DataFrame,
                   f"Online={avg_bookings_online:.1f}, "
                   f"Offline={avg_bookings_offline:.1f}, "
                   f"TrainBase=${avg_train_base_reward:.2f}, TrainShaped=${avg_train_shaped_reward:.2f}, "
-                  f"ShapePenalty={avg_shaping_penalty:.4f}, "
-                  f"SubsidyRatio={avg_subsidy_ratio*100:.1f}%, SubsidyAmt={avg_subsidy_amount:.2f}元, "
+                  f"ShapePenaltyRatio={avg_shaping_penalty:.4f}, "
+                  f"LastDaySubsidyRatio={avg_subsidy_ratio*100:.1f}%, SubsidyAmt={avg_subsidy_amount:.2f}元, "
                   f"Explore={exploration_rate:.3f}")
     
     print("\n训练完成！")

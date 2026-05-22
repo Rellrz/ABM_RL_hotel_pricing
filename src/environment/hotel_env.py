@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 # 本地模块导入
-from configs.config import ABM_CONFIG, RANDOM_CONFIG
+from configs.config import ABM_CONFIG, RANDOM_CONFIG, RL_CONFIG
 from src.utils.training_monitor import get_training_monitor
 from src.environment.abm_customer_model import HotelABMModel
 from configs.config import ENV_CONFIG
@@ -104,6 +104,7 @@ class HotelEnvironment:
         
         # ✅ 当前价格窗口：存储未来N天的价格
         self.current_price_window_online = [100.0] * self.booking_window_days
+        self.current_price_window_online_base = [100.0] * self.booking_window_days
         self.current_price_window_offline = [120.0] * self.booking_window_days
         
         self.reset()
@@ -150,6 +151,7 @@ class HotelEnvironment:
         
         # ✅ 重置价格窗口
         self.current_price_window_online = [100.0] * self.booking_window_days
+        self.current_price_window_online_base = [100.0] * self.booking_window_days
         self.current_price_window_offline = [120.0] * self.booking_window_days
         
         # 重置ABM模型
@@ -253,7 +255,12 @@ class HotelEnvironment:
                 daily_inv[self.day + i] = inv
         return daily_inv
     
-    def _step_with_abm(self, price_windows_online: List[float], price_windows_offline: List[float]) -> Tuple[int, float]:
+    def _step_with_abm(
+        self,
+        price_windows_online: List[float],
+        price_windows_offline: List[float],
+        price_windows_online_base: Optional[List[float]] = None,
+    ) -> Tuple[int, float]:
         """
         使用ABM进行需求模拟
         
@@ -274,6 +281,9 @@ class HotelEnvironment:
         
         # ✅ 更新价格窗口：使用传入的5天价格
         self.current_price_window_online = price_windows_online.copy()
+        self.current_price_window_online_base = (
+            price_windows_online.copy() if price_windows_online_base is None else price_windows_online_base.copy()
+        )
         self.current_price_window_offline = price_windows_offline.copy()
         
         # ✅ 同步库存状态到ABM
@@ -281,7 +291,9 @@ class HotelEnvironment:
         
         # ✅ 同步价格窗口到ABM
         self.abm_model.price_window_online = self.current_price_window_online.copy()
+        self.abm_model.price_window_online_base = self.current_price_window_online_base.copy()
         self.abm_model.price_window_offline = self.current_price_window_offline.copy()
+        self.abm_model.commission_rate = float(RL_CONFIG.commission_rate)
         self.abm_model.current_day = self.day  # 同步当前日期
         
         # 执行ABM模拟（使用今天的价格作为主价格，但ABM会根据target_date选择窗口价格）
@@ -336,29 +348,37 @@ class HotelEnvironment:
             raise ValueError(f"不支持的动作类型: {type(action)}，请传入价格对或价格窗口。")
 
         action_list = list(action)
-        if len(action_list) == 2 and not isinstance(action_list[0], (list, np.ndarray)):
-            # 单日价格对：[online, offline]
+        if len(action_list) in (2, 3) and not isinstance(action_list[0], (list, np.ndarray)):
+            # 单日价格对：[online, offline] 或 [online, offline, online_base]
             price_online = float(action_list[0])
             price_offline = float(action_list[1])
+            price_online_base = float(action_list[2]) if len(action_list) == 3 else price_online
             price_windows_online = [price_online] + self.current_price_window_online[1:]
+            price_windows_online_base = [price_online_base] + self.current_price_window_online_base[1:]
             price_windows_offline = [price_offline] + self.current_price_window_offline[1:]
         elif len(action_list) == self.booking_window_days:
-            # 完整窗口：[[online, offline], ...]
+            # 完整窗口：[[online, offline], ...] 或 [[online, offline, online_base], ...]
             price_windows_online = []
+            price_windows_online_base = []
             price_windows_offline = []
             for i, pair in enumerate(action_list):
-                if not isinstance(pair, (list, np.ndarray)) or len(pair) != 2:
+                if not isinstance(pair, (list, np.ndarray)) or len(pair) not in (2, 3):
                     raise ValueError(
-                        f"窗口动作第{i}项格式错误，期望[online, offline]，实际: {pair}"
+                        f"窗口动作第{i}项格式错误，期望[online, offline]或[online, offline, online_base]，实际: {pair}"
                     )
                 price_windows_online.append(float(pair[0]))
                 price_windows_offline.append(float(pair[1]))
+                price_windows_online_base.append(float(pair[2]) if len(pair) == 3 else float(pair[0]))
         else:
             raise ValueError(
-                f"动作长度不合法: {len(action_list)}，仅支持2或{self.booking_window_days}。"
+                f"动作长度不合法: {len(action_list)}，仅支持2、3或{self.booking_window_days}。"
             )
             
-        actual_bookings, total_revenue = self._step_with_abm(price_windows_online, price_windows_offline)
+        actual_bookings, total_revenue = self._step_with_abm(
+            price_windows_online,
+            price_windows_offline,
+            price_windows_online_base=price_windows_online_base,
+        )
             
         # 更新库存
         self._update_inventory(actual_bookings)
@@ -449,6 +469,7 @@ class HotelEnvironment:
             
             # ✅ 滚动价格窗口
             self.current_price_window_online = self.current_price_window_online[1:] + [self.current_price_window_online[-1]]
+            self.current_price_window_online_base = self.current_price_window_online_base[1:] + [self.current_price_window_online_base[-1]]
             self.current_price_window_offline = self.current_price_window_offline[1:] + [self.current_price_window_offline[-1]]
             
             # 更新当前库存为新的第0天库存

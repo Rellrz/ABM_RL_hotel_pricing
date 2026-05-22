@@ -74,6 +74,8 @@ class BucketPricingSimulator:
         self.decision_state_by_offset: List[Optional[Dict]] = []
         self.acc_bookings_online_by_offset: List[int] = []
         self.acc_bookings_offline_by_offset: List[int] = []
+        self.acc_revenue_online_by_offset: List[float] = []
+        self.acc_revenue_offline_by_offset: List[float] = []
 
     @property
     def n_stages(self) -> int:
@@ -88,6 +90,8 @@ class BucketPricingSimulator:
         self.decision_state_by_offset = [None] * self.config.booking_window_days
         self.acc_bookings_online_by_offset = [0] * self.config.booking_window_days
         self.acc_bookings_offline_by_offset = [0] * self.config.booking_window_days
+        self.acc_revenue_online_by_offset = [0.0] * self.config.booking_window_days
+        self.acc_revenue_offline_by_offset = [0.0] * self.config.booking_window_days
         return self.env.reset()
 
     def _build_stage_raw_state(self, off: int, stage_id: int) -> Dict:
@@ -165,6 +169,8 @@ class BucketPricingSimulator:
             commission_rate=self.config.commission_rate,
             subsidy_ratio=sr,
             reward_hotel_ratio=self.config.reward_hotel_ratio,
+            revenue_online=float(self.acc_revenue_online_by_offset[off]),
+            revenue_offline=float(self.acc_revenue_offline_by_offset[off]),
             state=self.decision_state_by_offset[off],
             online_price_min=self.config.online_price_min,
             online_price_max=self.config.online_price_max,
@@ -195,6 +201,8 @@ class BucketPricingSimulator:
         self.decision_state_by_offset = self.decision_state_by_offset[1:] + [self.decision_state_by_offset[-1]]
         self.acc_bookings_online_by_offset = self.acc_bookings_online_by_offset[1:] + [self.acc_bookings_online_by_offset[-1]]
         self.acc_bookings_offline_by_offset = self.acc_bookings_offline_by_offset[1:] + [self.acc_bookings_offline_by_offset[-1]]
+        self.acc_revenue_online_by_offset = self.acc_revenue_online_by_offset[1:] + [self.acc_revenue_online_by_offset[-1]]
+        self.acc_revenue_offline_by_offset = self.acc_revenue_offline_by_offset[1:] + [self.acc_revenue_offline_by_offset[-1]]
 
     def step_day(self, stage_actions: List[Tuple[float, float]]) -> DayResult:
         if len(stage_actions) != self.n_stages:
@@ -213,6 +221,8 @@ class BucketPricingSimulator:
             sr = float(self.ota.get_subsidy(pon, poff, lead_time=off))
             self.acc_bookings_online_by_offset[off] = 0
             self.acc_bookings_offline_by_offset[off] = 0
+            self.acc_revenue_online_by_offset[off] = 0.0
+            self.acc_revenue_offline_by_offset[off] = 0.0
             self.price_online_base_by_offset[off] = pon
             self.price_offline_by_offset[off] = poff
             self.subsidy_ratio_by_offset[off] = sr
@@ -223,7 +233,10 @@ class BucketPricingSimulator:
             - self.price_online_base_by_offset[i] * self.config.commission_rate * self.subsidy_ratio_by_offset[i]
             for i in range(self.config.booking_window_days)
         ]
-        actions_window = [[final_online[i], self.price_offline_by_offset[i]] for i in range(self.config.booking_window_days)]
+        actions_window = [
+            [final_online[i], self.price_offline_by_offset[i], self.price_online_base_by_offset[i]]
+            for i in range(self.config.booking_window_days)
+        ]
 
         _, _, done, info = self.env.step(actions_window)
         self.day += 1
@@ -242,6 +255,8 @@ class BucketPricingSimulator:
             p_on_base = float(self.price_online_base_by_offset[off])
             p_off = float(self.price_offline_by_offset[off])
             sr = float(self.subsidy_ratio_by_offset[off])
+            revenue_online = float(bookings[off].get("revenue_online", 0.0))
+            revenue_offline = float(bookings[off].get("revenue_offline", 0.0))
             reward_parts = compute_bucket_rewards(
                 bookings_online=bo,
                 bookings_offline=bf,
@@ -250,6 +265,8 @@ class BucketPricingSimulator:
                 commission_rate=self.config.commission_rate,
                 subsidy_ratio=sr,
                 reward_hotel_ratio=self.config.reward_hotel_ratio,
+                revenue_online=revenue_online,
+                revenue_offline=revenue_offline,
             )
             reward_hotel += float(reward_parts["revenue_hotel"])
             reward_ota += float(reward_parts["profit_ota"])
@@ -257,6 +274,8 @@ class BucketPricingSimulator:
             by_stage_ota[sid] += float(reward_parts["profit_ota"])
             self.acc_bookings_online_by_offset[off] += int(bo)
             self.acc_bookings_offline_by_offset[off] += int(bf)
+            self.acc_revenue_online_by_offset[off] += revenue_online
+            self.acc_revenue_offline_by_offset[off] += revenue_offline
 
         done = bool(done or self.day >= self.config.days_per_episode)
 
@@ -267,6 +286,8 @@ class BucketPricingSimulator:
                 update_events.append(ev)
             self.acc_bookings_online_by_offset[off] = 0
             self.acc_bookings_offline_by_offset[off] = 0
+            self.acc_revenue_online_by_offset[off] = 0.0
+            self.acc_revenue_offline_by_offset[off] = 0.0
             self.decision_state_by_offset[off] = None
 
         if done:
@@ -277,6 +298,8 @@ class BucketPricingSimulator:
                     update_events.append(ev)
                 self.acc_bookings_online_by_offset[off] = 0
                 self.acc_bookings_offline_by_offset[off] = 0
+                self.acc_revenue_online_by_offset[off] = 0.0
+                self.acc_revenue_offline_by_offset[off] = 0.0
         else:
             self._rotate_offsets()
 

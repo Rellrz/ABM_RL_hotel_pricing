@@ -66,4 +66,3 @@ def validate_config(rl_config: RLConfig, env_config: EnvConfig) -> bool:
         return False
 
     return True
-

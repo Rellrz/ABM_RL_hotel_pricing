@@ -265,7 +265,9 @@ class HotelABMModel(Model):
         # ✅ 价格窗口（由HotelEnvironment同步）
         self.booking_window_days = int(booking_window_days)
         self.price_window_online = [100.0] * self.booking_window_days
+        self.price_window_online_base = [100.0] * self.booking_window_days
         self.price_window_offline = [120.0] * self.booking_window_days
+        self.commission_rate = 0.0
 
         # 扰动状态（OU/AR1）
         self.demand_ou_state = 0.0
@@ -451,7 +453,8 @@ class HotelABMModel(Model):
 
         by_season_weekday = wtp_params.get('by_season_weekday')
         if isinstance(by_season_weekday, dict):
-            _, season, is_weekend = self._calendar_features(current_day)
+            # WTP should align with the stay date rather than the booking date.
+            _, season, is_weekend = self._calendar_features(target_date)
 
             seg = by_season_weekday.get(season) if isinstance(by_season_weekday, dict) else None
             if isinstance(seg, dict):
@@ -513,6 +516,12 @@ class HotelABMModel(Model):
         new_bookings_online = 0
         new_bookings_offline = 0
         cancellations = 0
+        room_marginal_cost = float(max(0.0, getattr(self.params, "room_marginal_cost", 0.0)))
+        commission_rate = float(np.clip(getattr(self, "commission_rate", 0.0), 0.0, 1.0))
+        revenue_online = 0.0
+        revenue_offline = 0.0
+        gross_revenue_hotel = 0.0
+        hotel_marginal_cost = 0.0
         
         # 按day_offset统计预订信息（用于强化学习更新）
         bookings_by_day_offset = [
@@ -529,6 +538,7 @@ class HotelABMModel(Model):
                 continue
 
             online_price = self.price_window_online[days_ahead]
+            online_price_base = self.price_window_online_base[days_ahead]
             offline_price = self.price_window_offline[days_ahead]
 
             # 做出预订决策
@@ -546,17 +556,27 @@ class HotelABMModel(Model):
                     # 统计总预订量
                     if customer.booking_record.customer_type == 'online':
                         new_bookings_online += 1
+                        hotel_gross_online = float(online_price_base) * (1.0 - commission_rate)
+                        hotel_net_online = hotel_gross_online - room_marginal_cost
+                        revenue_online += hotel_net_online
+                        gross_revenue_hotel += hotel_gross_online
+                        hotel_marginal_cost += room_marginal_cost
                     else:
                         new_bookings_offline += 1
+                        hotel_gross_offline = float(offline_price)
+                        hotel_net_offline = hotel_gross_offline - room_marginal_cost
+                        revenue_offline += hotel_net_offline
+                        gross_revenue_hotel += hotel_gross_offline
+                        hotel_marginal_cost += room_marginal_cost
                     
                     # 统计按day_offset分组的预订信息
                     if 0 <= days_ahead < self.booking_window_days:
                         if customer.booking_record.customer_type == 'online':
                             bookings_by_day_offset[days_ahead]['bookings_online'] += 1
-                            bookings_by_day_offset[days_ahead]['revenue_online'] += customer.booking_record.paid_price
+                            bookings_by_day_offset[days_ahead]['revenue_online'] += hotel_net_online
                         else:
                             bookings_by_day_offset[days_ahead]['bookings_offline'] += 1
-                            bookings_by_day_offset[days_ahead]['revenue_offline'] += customer.booking_record.paid_price
+                            bookings_by_day_offset[days_ahead]['revenue_offline'] += hotel_net_offline
                 # else: 该日期已满房，拒绝预订
             # 直接在simulate_day中创建booking_record，跳过效用函数
             #if not customer.has_booked and self.daily_available_rooms[target_date] > 0:
@@ -634,9 +654,9 @@ class HotelABMModel(Model):
             #    cancellations += 1
         
         # 记录当日统计
-        gross_revenue = new_bookings_online * price_online + new_bookings_offline * price_offline
+        gross_revenue = gross_revenue_hotel
         #net_revenue = gross_revenue - cancellation_refund  # ✅ 净收益 = 新预订收益 - 取消退款
-        net_revenue = gross_revenue
+        net_revenue = revenue_online + revenue_offline
 
         daily_stat = {
             'day': self.current_day,
@@ -649,9 +669,10 @@ class HotelABMModel(Model):
             'cancellations': cancellations,
             #'cancellation_refund': cancellation_refund,  # ✅ 记录退款金额
             'active_bookings': len(self.active_bookings),
-            'revenue_online': new_bookings_online * price_online,
-            'revenue_offline': new_bookings_offline * price_offline,
+            'revenue_online': revenue_online,
+            'revenue_offline': revenue_offline,
             'gross_revenue': gross_revenue,  # ✅ 毛收益（新预订）
+            'hotel_marginal_cost': hotel_marginal_cost,
             'total_revenue': net_revenue,  # ✅ 净收益（扣除退款后）
             'bookings_by_day_offset': bookings_by_day_offset,  # ✅ 按day_offset分组的预订信息
         }

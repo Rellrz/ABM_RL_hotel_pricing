@@ -35,6 +35,7 @@ class ABMConfig:
     )
     lead_time_params: Dict[str, Any] = field(default_factory=lambda: {'type': 'exponential', 'mean': 104.0})
     wtp_params: Dict[str, float] = field(default_factory=lambda: {'mean': 100.0, 'std': 30.0})
+    room_marginal_cost: float = 10.0
 
     urgency_weight: float = 20
     noise_std: float = 12.0
@@ -87,9 +88,9 @@ class RLConfig:
 
     reward_hotel_ratio: float = 1
     reward_ota_ratio: float = 0
-    reward_shape_price_weight: float = 0.30
-    reward_shape_sellthrough_weight: float = 0.22
-    reward_shape_target_sellthrough: float = 0.25
+    reward_shape_price_weight: float = 0.0            #0.3
+    reward_shape_sellthrough_weight: float = 0.0      #0.22
+    reward_shape_target_sellthrough: float = 0.0      #0.25
 
     cem_algorithm: str = 'cem'
     cem_n_samples: int = 400
