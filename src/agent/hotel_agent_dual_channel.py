@@ -14,7 +14,7 @@
 
 import numpy as np
 from collections import defaultdict, deque
-from typing import Union, Dict, Any
+from typing import Union, Dict, Any, Callable
 from src.algorithms.cem_nn import NeuralCrossEntropyMethod
 from src.algorithms.multivariate_cem import MultivariateCrossEntropyMethod
 from configs.config import RL_CONFIG
@@ -54,7 +54,8 @@ class HotelAgentDualChannel:
                  elite_frac: float = 0.2,
                  initial_std: float = 20.0,
                  min_std: float = 2.0,
-                 std_decay: float = 0.99):
+                 std_decay: float = 0.99,
+                 initial_mean_provider: Callable[[Any], np.ndarray | list[float] | tuple[float, float] | None] | None = None):
         """
         初始化双渠道酒店Agent
         
@@ -129,7 +130,8 @@ class HotelAgentDualChannel:
                 initial_std=initial_std,
                 min_std=min_std,
                 std_decay=std_decay,
-                memory_size=RL_CONFIG.cem_memory_size
+                memory_size=RL_CONFIG.cem_memory_size,
+                initial_mean_provider=initial_mean_provider,
             )
         
         # OTA补贴历史（用于预测OTA行为）

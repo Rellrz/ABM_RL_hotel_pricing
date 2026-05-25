@@ -19,6 +19,7 @@ from configs.config import RL_CONFIG, ENV_CONFIG, PATH_CONFIG
 from src.environment.hotel_env import HotelEnvironment
 from src.agent.hotel_agent_dual_channel import HotelAgentDualChannel
 from src.agent.ota_agent import OTASubsidyHeuristic
+from src.training.emsrb_baseline import build_emsrb_init_mean_table
 from src.utils.common import compute_bucket_rewards, enrich_bucket_state
 
 def _parse_buckets(spec: Optional[str], n: int) -> List[Tuple[int, int]]:
@@ -57,6 +58,50 @@ def _build_stage_state(env: HotelEnvironment, buckets: List[Tuple[int, int]], of
     return enrich_bucket_state(st)
 
 
+def _build_cem_initial_mean_provider(
+    historical_data: pd.DataFrame,
+    booking_window_days: int,
+    decision_buckets: str,
+):
+    strategy = str(getattr(RL_CONFIG, "cem_init_strategy", "midpoint")).strip().lower()
+    if strategy == "midpoint":
+        return None
+
+    midpoint = np.array(
+        [
+            (float(RL_CONFIG.online_price_min) + float(RL_CONFIG.online_price_max)) * 0.5,
+            (float(RL_CONFIG.offline_price_min) + float(RL_CONFIG.offline_price_max)) * 0.5,
+        ],
+        dtype=float,
+    )
+    alpha = 1.0 if strategy == "emsrb" else float(np.clip(getattr(RL_CONFIG, "cem_init_blend_alpha", 0.7), 0.0, 1.0))
+    prior_table = build_emsrb_init_mean_table(
+        historical_data=historical_data,
+        initial_inventory=ENV_CONFIG.initial_inventory,
+        booking_window_days=booking_window_days,
+        decision_buckets=decision_buckets,
+        online_price_min=RL_CONFIG.online_price_min,
+        online_price_max=RL_CONFIG.online_price_max,
+        offline_price_min=RL_CONFIG.offline_price_min,
+        offline_price_max=RL_CONFIG.offline_price_max,
+    )
+    action_mins = np.array([float(RL_CONFIG.online_price_min), float(RL_CONFIG.offline_price_min)], dtype=float)
+    action_maxs = np.array([float(RL_CONFIG.online_price_max), float(RL_CONFIG.offline_price_max)], dtype=float)
+
+    def provider(state_key):
+        if not isinstance(state_key, tuple) or len(state_key) < 3:
+            return midpoint.copy()
+        coarse_key = (int(state_key[0]), int(state_key[1]), int(state_key[2]))
+        prior = prior_table.get(coarse_key)
+        if prior is None:
+            return midpoint.copy()
+        prior_vec = np.asarray(prior, dtype=float).reshape(2)
+        blended = (1.0 - alpha) * midpoint + alpha * prior_vec
+        return np.clip(blended, action_mins, action_maxs)
+
+    return provider
+
+
 def train_game_system(historical_data: pd.DataFrame, 
                       episodes: int = 100,
                       training_mode: str = 'simultaneous',
@@ -86,6 +131,9 @@ def train_game_system(historical_data: pd.DataFrame,
     print(f"训练模式: {training_mode}")
     print(f"佣金率: {RL_CONFIG.commission_rate * 100:.1f}%")
     print(f"补贴比例范围: 0.0% - {RL_CONFIG.subsidy_ratio_max * 100:.1f}%")
+    print(f"CEM初始化策略: {RL_CONFIG.cem_init_strategy}")
+    if str(RL_CONFIG.cem_init_strategy).lower() == 'blended':
+        print(f"CEM初始化混合系数: {RL_CONFIG.cem_init_blend_alpha:.2f}")
     
     buckets = _parse_buckets(decision_buckets, booking_window_days)
     n_stages = len(buckets) if buckets else 1
@@ -98,6 +146,11 @@ def train_game_system(historical_data: pd.DataFrame,
     )
     
     # 创建酒店Agent（30×K）
+    initial_mean_provider = _build_cem_initial_mean_provider(
+        historical_data=historical_data,
+        booking_window_days=booking_window_days,
+        decision_buckets=decision_buckets,
+    )
     hotel_agent = HotelAgentDualChannel(
         n_states=30 * n_stages,
         commission_rate=RL_CONFIG.commission_rate,
@@ -109,7 +162,8 @@ def train_game_system(historical_data: pd.DataFrame,
         elite_frac=RL_CONFIG.cem_elite_frac,
         initial_std=RL_CONFIG.initial_std,
         min_std=RL_CONFIG.min_std,
-        std_decay=RL_CONFIG.std_decay
+        std_decay=RL_CONFIG.std_decay,
+        initial_mean_provider=initial_mean_provider,
     )
     
     # 创建OTA启发式外生策略

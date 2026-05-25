@@ -8,7 +8,7 @@ with a per-state multivariate Gaussian distribution:
 """
 
 from collections import defaultdict, deque
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import numpy as np
 
@@ -37,6 +37,7 @@ class MultivariateCrossEntropyMethod:
         alpha: float = 0.3,
         cov_reg: float = 1e-5,
         diagonal_covariance: bool = False,
+        initial_mean_provider: Callable[[Any], np.ndarray | List[float] | Tuple[float, float] | None] | None = None,
     ):
         self.n_states = int(n_states)
         self.action_mins = np.array(action_mins, dtype=float)
@@ -50,6 +51,7 @@ class MultivariateCrossEntropyMethod:
         self.alpha = float(alpha)
         self.cov_reg = float(cov_reg)
         self.diagonal_covariance = bool(diagonal_covariance)
+        self.initial_mean_provider = initial_mean_provider
 
         if np.isscalar(initial_std):
             init_std_vec = np.array([float(initial_std), float(initial_std)], dtype=float)
@@ -62,8 +64,8 @@ class MultivariateCrossEntropyMethod:
         self.initial_cov = np.diag(self.initial_std_vec ** 2)
         self.initial_mean = (self.action_mins + self.action_maxs) / 2.0
 
-        self.mean_table = defaultdict(lambda: self.initial_mean.copy())
-        self.cov_table = defaultdict(lambda: self.initial_cov.copy())
+        self.mean_table: Dict[Any, np.ndarray] = {}
+        self.cov_table: Dict[Any, np.ndarray] = {}
         self.memory = defaultdict(lambda: deque(maxlen=self.memory_size))
         self.state_visit_count = defaultdict(int)
         self.episode_count = 0
@@ -71,6 +73,23 @@ class MultivariateCrossEntropyMethod:
 
     def _state_key(self, state: Union[List, np.ndarray, int]) -> Any:
         return tuple(state) if isinstance(state, (list, np.ndarray)) else state
+
+    def _initial_mean_for_state(self, state_key: Any) -> np.ndarray:
+        if self.initial_mean_provider is None:
+            return self.initial_mean.copy()
+        candidate = self.initial_mean_provider(state_key)
+        if candidate is None:
+            return self.initial_mean.copy()
+        arr = np.asarray(candidate, dtype=float).reshape(-1)
+        if arr.shape != (2,):
+            return self.initial_mean.copy()
+        return np.clip(arr, self.action_mins, self.action_maxs).astype(float)
+
+    def _ensure_state_params(self, state_key: Any) -> None:
+        if state_key not in self.mean_table:
+            self.mean_table[state_key] = self._initial_mean_for_state(state_key)
+        if state_key not in self.cov_table:
+            self.cov_table[state_key] = self.initial_cov.copy()
 
     def _sanitize_cov(self, cov: np.ndarray) -> np.ndarray:
         cov = np.asarray(cov, dtype=float)
@@ -107,6 +126,7 @@ class MultivariateCrossEntropyMethod:
 
     def sample(self, state: Union[List, np.ndarray, int], n_samples: int = None) -> np.ndarray:
         state_key = self._state_key(state)
+        self._ensure_state_params(state_key)
         mu = self.mean_table[state_key]
         cov = self._sanitize_cov(self.cov_table[state_key])
         num = self.n_samples if n_samples is None else int(n_samples)
@@ -121,6 +141,7 @@ class MultivariateCrossEntropyMethod:
 
     def select_action(self, state: Union[List, np.ndarray, int], deterministic: bool = False) -> np.ndarray:
         state_key = self._state_key(state)
+        self._ensure_state_params(state_key)
         if deterministic:
             action = self.mean_table[state_key]
         else:
@@ -136,6 +157,7 @@ class MultivariateCrossEntropyMethod:
         done: bool,
     ) -> float:
         state_key = self._state_key(state)
+        self._ensure_state_params(state_key)
         action_arr = np.asarray(action, dtype=float).reshape(-1)
         if action_arr.shape != (2,):
             raise ValueError(f"action must be shape (2,), got {action_arr.shape}")

@@ -234,6 +234,44 @@ def _build_stage_policy_fn(config: Experiment2Config, profile: EMSRbProfile):
     return stage_policy_fn
 
 
+def build_emsrb_init_mean_table(
+    historical_data: pd.DataFrame,
+    *,
+    initial_inventory: int,
+    booking_window_days: int,
+    decision_buckets: str,
+    online_price_min: float,
+    online_price_max: float,
+    offline_price_min: float,
+    offline_price_max: float,
+) -> Dict[Tuple[int, int, int], Tuple[float, float]]:
+    """
+    基于 EMSR-b 构造 CEM 的 coarse 初始化均值表。
+
+    返回的键为 `(stage_id, season, weekday)`，用于给同一粗分组下的细状态共享初始均值。
+    """
+    config = Experiment2Config(
+        initial_inventory=int(initial_inventory),
+        booking_window_days=int(booking_window_days),
+        decision_buckets=str(decision_buckets),
+        online_price_min=float(online_price_min),
+        online_price_max=float(online_price_max),
+        offline_price_min=float(offline_price_min),
+        offline_price_max=float(offline_price_max),
+    )
+    profile = _build_emsrb_profile(config, historical_data)
+    stage_policy_fn = _build_stage_policy_fn(config, profile)
+    n_stages = len(parse_buckets(config.decision_buckets, config.booking_window_days))
+
+    table: Dict[Tuple[int, int, int], Tuple[float, float]] = {}
+    for stage_id in range(n_stages):
+        for season in (0, 1, 2):
+            for weekday in (0, 1):
+                pon, poff = stage_policy_fn(stage_id, {"season": season, "weekday": weekday})
+                table[(int(stage_id), int(season), int(weekday))] = (float(pon), float(poff))
+    return table
+
+
 def _run_single_seed(
     config: Experiment2Config,
     historical_data: pd.DataFrame,

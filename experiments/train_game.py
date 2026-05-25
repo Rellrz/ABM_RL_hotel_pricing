@@ -32,6 +32,8 @@ def main():
     parser.add_argument('--update-frequency', type=int, default=30, help='CEM参数更新频率（每N天更新一次）')
     parser.add_argument('--booking-window-days', type=int, default=91, help='预订窗口长度（0-90天对应91）')
     parser.add_argument('--decision-buckets', type=str, default='0|1|2-3|4-6|7-13|14-29|30-59|60-90', help='提前期分桶，如: 0|1|2-3|4-6|7-13|14-29|30-59|60-90（为空则自动生成）')
+    parser.add_argument('--cem-init-strategy', type=str, default=RL_CONFIG.cem_init_strategy, choices=['midpoint', 'emsrb', 'blended'], help='CEM初始均值策略')
+    parser.add_argument('--cem-init-blend-alpha', type=float, default=RL_CONFIG.cem_init_blend_alpha, help='blended初始化时 EMSR-b prior 权重')
     
     args = parser.parse_args()
     
@@ -44,12 +46,17 @@ def main():
     print(f"补贴比例范围: 0%-{args.subsidy_ratio_max * 100:.0f}%")
     print(f"CEM更新频率: 每{args.update_frequency}天更新一次")
     print(f"预订窗口: 0-{args.booking_window_days - 1}天")
+    print(f"CEM初始化策略: {args.cem_init_strategy}")
+    if args.cem_init_strategy == 'blended':
+        print(f"CEM初始化混合系数: {args.cem_init_blend_alpha:.2f}")
     if str(args.decision_buckets).strip():
         print(f"提前期分桶: {args.decision_buckets}")
     
     # 更新配置
     RL_CONFIG.commission_rate = args.commission
     RL_CONFIG.subsidy_ratio_max = args.subsidy_ratio_max
+    RL_CONFIG.cem_init_strategy = args.cem_init_strategy
+    RL_CONFIG.cem_init_blend_alpha = args.cem_init_blend_alpha
     
     # 加载数据
     print("\n=== 加载历史数据 ===")

@@ -82,19 +82,21 @@ class ABMConfig:
 class RLConfig:
     """强化学习配置（博弈主线，仅支持CEM/CEM-NN）"""
     n_states: int = 18
-    initial_std: float = 50.0
+    initial_std: float = 30.0
     min_std: float = 3.0
     std_decay: float = 0.999
 
     reward_hotel_ratio: float = 1
     reward_ota_ratio: float = 0
-    reward_shape_price_weight: float = 0.0            #0.3
-    reward_shape_sellthrough_weight: float = 0.0      #0.22
-    reward_shape_target_sellthrough: float = 0.0      #0.25
+    reward_shape_price_weight: float = 0.3            #0.3
+    reward_shape_sellthrough_weight: float = 0.22      #0.22
+    reward_shape_target_sellthrough: float = 0.25      #0.25
 
     cem_algorithm: str = 'cem'
     cem_n_samples: int = 400
     cem_elite_frac: float = 0.3
+    cem_init_strategy: str = 'blended'  # midpoint / emsrb / blended
+    cem_init_blend_alpha: float = 0.7
 
     cem_nn_state_dim: int = 18
     cem_nn_learning_rate: float = 0.001

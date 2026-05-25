@@ -17,6 +17,14 @@ def validate_config(rl_config: RLConfig, env_config: EnvConfig) -> bool:
         print("错误：cem_n_samples必须大于0")
         return False
 
+    if rl_config.cem_init_strategy not in ("midpoint", "emsrb", "blended"):
+        print("错误：cem_init_strategy必须为'midpoint'、'emsrb'或'blended'")
+        return False
+
+    if not (0.0 <= rl_config.cem_init_blend_alpha <= 1.0):
+        print("错误：cem_init_blend_alpha必须在0和1之间")
+        return False
+
     if rl_config.initial_std <= 0 or rl_config.min_std <= 0:
         print("错误：initial_std和min_std必须大于0")
         return False
