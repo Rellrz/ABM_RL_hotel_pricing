@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from .schema import EnvConfig, RLConfig
+from .schema import ABMConfig, EnvConfig, RLConfig
 
 
 def validate_config(rl_config: RLConfig, env_config: EnvConfig) -> bool:
@@ -11,6 +11,10 @@ def validate_config(rl_config: RLConfig, env_config: EnvConfig) -> bool:
 
     if not (0.0 <= rl_config.cem_elite_frac <= 1.0):
         print("错误：cem_elite_frac必须在0和1之间")
+        return False
+
+    if not (0.0 <= rl_config.cem_alpha <= 1.0):
+        print("错误：cem_alpha必须在0和1之间")
         return False
 
     if rl_config.cem_n_samples <= 0:
@@ -71,6 +75,42 @@ def validate_config(rl_config: RLConfig, env_config: EnvConfig) -> bool:
 
     if env_config.booking_window_days <= 0:
         print("错误：booking_window_days必须大于0")
+        return False
+
+    return True
+
+
+def validate_abm_config(abm_config: ABMConfig) -> bool:
+    if abm_config.room_marginal_cost < 0:
+        print("错误：room_marginal_cost不能小于0")
+        return False
+
+    if not (0.0 <= abm_config.online_discount_ratio <= 1.0):
+        print("错误：online_discount_ratio必须在0和1之间")
+        return False
+
+    if not (0.0 <= abm_config.anchor_quantile_low <= 1.0 and 0.0 <= abm_config.anchor_quantile_high <= 1.0):
+        print("错误：anchor_quantile_low和anchor_quantile_high必须在0和1之间")
+        return False
+
+    if abm_config.anchor_quantile_low > abm_config.anchor_quantile_high:
+        print("错误：anchor_quantile_low不能大于anchor_quantile_high")
+        return False
+
+    if min(abm_config.anchor_weight_low, abm_config.anchor_weight_mean, abm_config.anchor_weight_high) < 0:
+        print("错误：anchor权重不能小于0")
+        return False
+
+    if min(abm_config.anchor_eta_single, abm_config.anchor_eta_joint) < 0:
+        print("错误：anchor强度参数不能小于0")
+        return False
+
+    if min(abm_config.anchor_lambda_plus, abm_config.anchor_lambda_minus) < 0:
+        print("错误：anchor_lambda_plus和anchor_lambda_minus不能小于0")
+        return False
+
+    if not (0.0 <= abm_config.anchor_joint_theta <= 1.0):
+        print("错误：anchor_joint_theta必须在0和1之间")
         return False
 
     return True

@@ -64,8 +64,37 @@ class CustomerAgent(Agent):
         self.profile = profile
         self.has_booked = False
         self.booking_record: Optional[BookingRecord] = None
+
+    def _anchor_value(self, price_gap: float) -> float:
+        lambda_plus = float(max(0.0, getattr(self.model.params, 'anchor_lambda_plus', 1.0)))
+        lambda_minus = float(max(0.0, getattr(self.model.params, 'anchor_lambda_minus', 2.0)))
+        if price_gap >= 0.0:
+            return lambda_plus * float(price_gap)
+        return lambda_minus * float(price_gap)
+
+    def _compute_anchor_utility(self, channel: str, price: float, reference_prices: Dict[str, float]) -> float:
+        if not bool(reference_prices.get('enabled', False)):
+            return 0.0
+
+        del channel
+        price = float(price)
+        customer_type = self.profile.customer_type
+        if customer_type == 'online_only':
+            eta_single = float(max(0.0, getattr(self.model.params, 'anchor_eta_single', 0.30)))
+            irp_single = float(reference_prices.get('single', price))
+            return float(eta_single * self._anchor_value(irp_single - price))
+
+        eta_joint = float(max(0.0, getattr(self.model.params, 'anchor_eta_joint', 0.30)))
+        irp_joint = float(reference_prices.get('joint', price))
+        return float(eta_joint * self._anchor_value(irp_joint - price))
         
-    def evaluate_booking_utility(self, price: float, current_day: int, discount_ratio: float = 1.0) -> float:
+    def evaluate_booking_utility(
+        self,
+        price: float,
+        current_day: int,
+        discount_ratio: float = 1.0,
+        channel: str = 'online',
+    ) -> float:
         """
         评估预订效用
         
@@ -82,13 +111,28 @@ class CustomerAgent(Agent):
         # 经济盈余效用：β * (WTP - P)
         economic_surplus = self.profile.price_sensitivity * ((self.profile.wtp * discount_ratio) - price)
         
+        reference_prices = self.model.compute_anchor_reference_prices(
+            customer_type=self.profile.customer_type,
+        )
+        anchor_utility = self._compute_anchor_utility(
+            channel=channel,
+            price=float(price),
+            reference_prices=reference_prices,
+        )
+
         # 紧迫性效用：γ/(L+1)
         # 提前期越短，紧迫性越高
         gamma = self.model.params.urgency_weight
         urgency_utility = gamma / (self.profile.lead_time + 1)
+
         
         # 总效用 + 行为噪声（可开关）
-        utility = economic_surplus + urgency_utility + self.model.sample_utility_noise(current_day)
+        utility = (
+            economic_surplus
+            + anchor_utility
+            + urgency_utility
+            + self.model.sample_utility_noise(current_day)
+        )
         
         return utility
     
@@ -108,11 +152,25 @@ class CustomerAgent(Agent):
         
         # 计算效用
         if self.profile.customer_type == 'online_only':
-            online_utility = self.evaluate_booking_utility(online_price, current_day,discount_ratio = self.model.params.online_discount_ratio)
+            online_utility = self.evaluate_booking_utility(
+                online_price,
+                current_day,
+                discount_ratio=self.model.params.online_discount_ratio,
+                channel='online',
+            )
             offline_utility = None
         else:
-            online_utility = self.evaluate_booking_utility(online_price, current_day,discount_ratio = self.model.params.online_discount_ratio)
-            offline_utility = self.evaluate_booking_utility(offline_price, current_day)
+            online_utility = self.evaluate_booking_utility(
+                online_price,
+                current_day,
+                discount_ratio=self.model.params.online_discount_ratio,
+                channel='online',
+            )
+            offline_utility = self.evaluate_booking_utility(
+                offline_price,
+                current_day,
+                channel='offline',
+            )
         
         if offline_utility is None:
             utility = online_utility
@@ -362,6 +420,61 @@ class HotelABMModel(Model):
             std = max(0.0, float(self.params.utility_normal_std))
             return float(self.rng.normal(loc=0.0, scale=std))
         return 0.0
+
+    def _get_price_calendar(self, channel: str) -> np.ndarray:
+        if channel == 'online':
+            prices = self.price_window_online
+        else:
+            prices = self.price_window_offline
+        arr = np.asarray(prices, dtype=float)
+        if arr.size == 0:
+            return np.asarray([0.0], dtype=float)
+        return arr
+
+    def _compute_internal_reference_price(self, prices: np.ndarray) -> float:
+        q_low = float(np.clip(getattr(self.params, 'anchor_quantile_low', 0.10), 0.0, 1.0))
+        q_high = float(np.clip(getattr(self.params, 'anchor_quantile_high', 0.90), 0.0, 1.0))
+        if q_low > q_high:
+            q_low, q_high = q_high, q_low
+
+        w_low = float(max(0.0, getattr(self.params, 'anchor_weight_low', 0.50)))
+        w_mean = float(max(0.0, getattr(self.params, 'anchor_weight_mean', 0.35)))
+        w_high = float(max(0.0, getattr(self.params, 'anchor_weight_high', 0.15)))
+        w_sum = w_low + w_mean + w_high
+        if w_sum <= 0:
+            w_low, w_mean, w_high = 0.50, 0.35, 0.15
+            w_sum = 1.0
+
+        p_low = float(np.quantile(prices, q_low))
+        p_mean = float(np.mean(prices))
+        p_high = float(np.quantile(prices, q_high))
+        return float((w_low * p_low + w_mean * p_mean + w_high * p_high) / w_sum)
+
+
+    def compute_anchor_reference_prices(self, customer_type: str) -> Dict[str, float]:
+        if not bool(getattr(self.params, 'anchor_enabled', False)):
+            return {'enabled': False}
+
+        if customer_type == 'online_only':
+            prices = self._get_price_calendar('online')
+            irp_single = self._compute_internal_reference_price(prices)
+            return {
+                'enabled': True,
+                'single': float(irp_single),
+            }
+
+        prices_on = self._get_price_calendar('online')
+        prices_off = self._get_price_calendar('offline')
+        irp_on = self._compute_internal_reference_price(prices_on)
+        irp_off = self._compute_internal_reference_price(prices_off)
+        theta = float(np.clip(getattr(self.params, 'anchor_joint_theta', 0.50), 0.0, 1.0))
+        irp_joint = theta * irp_on + (1.0 - theta) * irp_off
+        return {
+            'enabled': True,
+            'online': float(irp_on),
+            'offline': float(irp_off),
+            'joint': float(irp_joint),
+        }
     
     def generate_daily_customers(self, current_day: int) -> List[CustomerAgent]:
         """

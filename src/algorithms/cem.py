@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
+from configs.config import RL_CONFIG
 from src.algorithms.base_algorithm import BaseRLAlgorithm
 
 
@@ -45,7 +46,8 @@ class CrossEntropyMethod(BaseRLAlgorithm):
                  initial_std: float = 20.0,
                  min_std: float = 2.0,
                  std_decay: float = 0.99,
-                 memory_size: int = 100):
+                 memory_size: int = 100,
+                 alpha: float | None = None):
         """
         初始化CEM算法
         
@@ -60,6 +62,7 @@ class CrossEntropyMethod(BaseRLAlgorithm):
             min_std: 最小标准差
             std_decay: 标准差衰减率
             memory_size: 经验回放大小
+            alpha: 分布参数平滑更新率；为空时从RL_CONFIG.cem_alpha读取
         """
         self.n_states = n_states
         self.action_min = action_min
@@ -71,6 +74,7 @@ class CrossEntropyMethod(BaseRLAlgorithm):
         self.min_std = min_std
         self.std_decay = std_decay
         self.memory_size = memory_size
+        self.alpha = float(np.clip(RL_CONFIG.cem_alpha if alpha is None else alpha, 0.0, 1.0))
         
         # 动作分布参数：μ(s) 和 σ(s)
         initial_mean = (action_min + action_max) / 2.0
@@ -179,7 +183,7 @@ class CrossEntropyMethod(BaseRLAlgorithm):
         new_std = np.std(elite_actions)
         
         # 平滑更新（避免剧烈变化）
-        alpha = 0.3  # 更新率
+        alpha = self.alpha
         self.mean_table[state_key] = (1 - alpha) * self.mean_table[state_key] + alpha * new_mean
         self.std_table[state_key] = max(self.min_std, (1 - alpha) * self.std_table[state_key] + alpha * new_std)
         

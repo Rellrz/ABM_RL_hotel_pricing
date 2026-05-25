@@ -37,11 +37,25 @@ class ABMConfig:
     wtp_params: Dict[str, float] = field(default_factory=lambda: {'mean': 100.0, 'std': 30.0})
     room_marginal_cost: float = 10.0
 
-    urgency_weight: float = 20
+    urgency_weight: float = 30
     noise_std: float = 12.0
     booking_threshold: float = -15
     customer_type_ratio: Tuple[float, float] = (0.7, 0.3)  # (online_only, omnichannel)
     online_discount_ratio: float = 0.95
+    channel_utility_online: float = 0.0
+    channel_utility_offline: float = 0.0
+
+    anchor_enabled: bool = True
+    anchor_quantile_low: float = 0.10
+    anchor_quantile_high: float = 0.90
+    anchor_weight_low: float = 0.50
+    anchor_weight_mean: float = 0.35
+    anchor_weight_high: float = 0.15
+    anchor_eta_single: float = 0.30
+    anchor_eta_joint: float = 0.30
+    anchor_joint_theta: float = 0.50
+    anchor_lambda_plus: float = 1.0
+    anchor_lambda_minus: float = 2.0
 
     regret_coefficient: float = 0.75
     commitment_weight: float = 8.0
@@ -82,19 +96,20 @@ class ABMConfig:
 class RLConfig:
     """强化学习配置（博弈主线，仅支持CEM/CEM-NN）"""
     n_states: int = 18
-    initial_std: float = 30.0
+    initial_std: float = 50.0
     min_std: float = 3.0
     std_decay: float = 0.999
 
     reward_hotel_ratio: float = 1
     reward_ota_ratio: float = 0
-    reward_shape_price_weight: float = 0.3            #0.3
-    reward_shape_sellthrough_weight: float = 0.22      #0.22
-    reward_shape_target_sellthrough: float = 0.25      #0.25
+    reward_shape_price_weight: float = 0.0            #0.3
+    reward_shape_sellthrough_weight: float = 0.0      #0.22
+    reward_shape_target_sellthrough: float = 0.0      #0.25
 
     cem_algorithm: str = 'cem'
     cem_n_samples: int = 400
     cem_elite_frac: float = 0.3
+    cem_alpha: float = 0.2
     cem_init_strategy: str = 'blended'  # midpoint / emsrb / blended
     cem_init_blend_alpha: float = 0.7
 
@@ -114,10 +129,10 @@ class RLConfig:
     ota_decay_lambda: float = 0.05
     ota_noise_std: float = 0.05
     ota_seed: int = 42
-    online_price_min: float = 60.0
-    online_price_max: float = 160.0
-    offline_price_min: float = 60.0
-    offline_price_max: float = 160.0
+    online_price_min: float = 50.0
+    online_price_max: float = 150.0
+    offline_price_min: float = 50.0
+    offline_price_max: float = 150.0
     game_training_mode: str = 'simultaneous'
 
     episodes: int = 250
