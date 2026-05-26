@@ -64,6 +64,7 @@ class CustomerAgent(Agent):
         self.profile = profile
         self.has_booked = False
         self.booking_record: Optional[BookingRecord] = None
+        self.last_decision_details: Dict[str, object] = {}
 
     def _anchor_value(self, price_gap: float) -> float:
         lambda_plus = float(max(0.0, getattr(self.model.params, 'anchor_lambda_plus', 1.0)))
@@ -187,8 +188,18 @@ class CustomerAgent(Agent):
                 chosen_channel = 'offline'
 
         threshold = self.model.params.booking_threshold
+        decision_pass = bool(utility > threshold)
+        self.last_decision_details = {
+            'online_utility': float(online_utility),
+            'offline_utility': float(np.nan if offline_utility is None else offline_utility),
+            'chosen_channel': str(chosen_channel),
+            'chosen_price': float(price),
+            'chosen_utility': float(utility),
+            'booking_threshold': float(threshold),
+            'passed_utility_threshold': decision_pass,
+        }
         # 做出决策
-        if utility > threshold:
+        if decision_pass:
             self.has_booked = True
             self.booking_record = BookingRecord(
                 customer_id=self.unique_id,
@@ -338,6 +349,8 @@ class HotelABMModel(Model):
         # 历史记录
         self.booking_history: List[BookingRecord] = []
         self.daily_stats: List[Dict] = []
+        self.trace_customer_utility = False
+        self.customer_utility_trace: List[Dict] = []
         
         # 数据收集器
         self.datacollector = DataCollector(
@@ -449,6 +462,50 @@ class HotelABMModel(Model):
         p_mean = float(np.mean(prices))
         p_high = float(np.quantile(prices, q_high))
         return float((w_low * p_low + w_mean * p_mean + w_high * p_high) / w_sum)
+
+    def _record_customer_utility_trace(
+        self,
+        *,
+        customer: CustomerAgent,
+        current_day: int,
+        day_offset: int,
+        online_price: float,
+        online_price_base: float,
+        offline_price: float,
+        inventory_before: int,
+        inventory_after: int,
+        final_status: str,
+    ) -> None:
+        if not bool(getattr(self, "trace_customer_utility", False)):
+            return
+
+        decision = dict(getattr(customer, "last_decision_details", {}) or {})
+        self.customer_utility_trace.append(
+            {
+                'current_day': int(current_day),
+                'customer_id': int(customer.unique_id),
+                'lead_time': int(customer.profile.lead_time),
+                'target_date': int(customer.profile.target_date),
+                'day_offset': int(day_offset),
+                'customer_type': str(customer.profile.customer_type),
+                'wtp': float(customer.profile.wtp),
+                'price_sensitivity': float(customer.profile.price_sensitivity),
+                'online_price': float(online_price),
+                'online_price_base': float(online_price_base),
+                'offline_price': float(offline_price),
+                'online_utility': float(decision.get('online_utility', np.nan)),
+                'offline_utility': float(decision.get('offline_utility', np.nan)),
+                'chosen_channel': str(decision.get('chosen_channel', 'none')),
+                'chosen_price': float(decision.get('chosen_price', np.nan)),
+                'chosen_utility': float(decision.get('chosen_utility', np.nan)),
+                'booking_threshold': float(decision.get('booking_threshold', np.nan)),
+                'passed_utility_threshold': bool(decision.get('passed_utility_threshold', False)),
+                'inventory_before': int(inventory_before),
+                'inventory_after': int(inventory_after),
+                'booked': bool(final_status.startswith('booked_')),
+                'final_status': str(final_status),
+            }
+        )
 
 
     def compute_anchor_reference_prices(self, customer_type: str) -> Dict[str, float]:
@@ -655,6 +712,7 @@ class HotelABMModel(Model):
             offline_price = self.price_window_offline[days_ahead]
 
             # 做出预订决策
+            inventory_before = int(self.daily_available_rooms[target_date])
             if customer.make_booking_decision(online_price, offline_price, self.current_day):
                 target_date = customer.booking_record.target_date
                 
@@ -690,7 +748,42 @@ class HotelABMModel(Model):
                         else:
                             bookings_by_day_offset[days_ahead]['bookings_offline'] += 1
                             bookings_by_day_offset[days_ahead]['revenue_offline'] += hotel_net_offline
+                    self._record_customer_utility_trace(
+                        customer=customer,
+                        current_day=self.current_day,
+                        day_offset=days_ahead,
+                        online_price=online_price,
+                        online_price_base=online_price_base,
+                        offline_price=offline_price,
+                        inventory_before=inventory_before,
+                        inventory_after=int(self.daily_available_rooms[target_date]),
+                        final_status=f"booked_{customer.booking_record.customer_type}",
+                    )
+                else:
+                    self._record_customer_utility_trace(
+                        customer=customer,
+                        current_day=self.current_day,
+                        day_offset=days_ahead,
+                        online_price=online_price,
+                        online_price_base=online_price_base,
+                        offline_price=offline_price,
+                        inventory_before=inventory_before,
+                        inventory_after=inventory_before,
+                        final_status='rejected_inventory',
+                    )
                 # else: 该日期已满房，拒绝预订
+            else:
+                self._record_customer_utility_trace(
+                    customer=customer,
+                    current_day=self.current_day,
+                    day_offset=days_ahead,
+                    online_price=online_price,
+                    online_price_base=online_price_base,
+                    offline_price=offline_price,
+                    inventory_before=inventory_before,
+                    inventory_after=inventory_before,
+                    final_status='rejected_threshold',
+                )
             # 直接在simulate_day中创建booking_record，跳过效用函数
             #if not customer.has_booked and self.daily_available_rooms[target_date] > 0:
             #    customer.has_booked = True
@@ -853,6 +946,7 @@ class HotelABMModel(Model):
         self.active_bookings = []
         self.booking_history = []
         self.daily_stats = []
+        self.customer_utility_trace = []
         self.schedule = RandomActivation(self)
         self.datacollector = DataCollector(
             model_reporters={
@@ -871,6 +965,10 @@ class HotelABMModel(Model):
             每日统计数据DataFrame
         """
         return pd.DataFrame(self.daily_stats)
+
+    def get_customer_utility_trace(self) -> pd.DataFrame:
+        """返回当前episode的消费者效用轨迹。"""
+        return pd.DataFrame(self.customer_utility_trace)
     
     def step(self):
         """

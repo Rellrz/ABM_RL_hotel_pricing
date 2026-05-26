@@ -37,22 +37,23 @@ class ABMConfig:
     wtp_params: Dict[str, float] = field(default_factory=lambda: {'mean': 100.0, 'std': 30.0})
     room_marginal_cost: float = 10.0
 
-    urgency_weight: float = 30
+    urgency_weight: float = 20
     noise_std: float = 12.0
     booking_threshold: float = -15
     customer_type_ratio: Tuple[float, float] = (0.7, 0.3)  # (online_only, omnichannel)
     online_discount_ratio: float = 0.95
-    channel_utility_online: float = 0.0
-    channel_utility_offline: float = 0.0
 
     anchor_enabled: bool = True
     anchor_quantile_low: float = 0.10
     anchor_quantile_high: float = 0.90
-    anchor_weight_low: float = 0.50
-    anchor_weight_mean: float = 0.35
-    anchor_weight_high: float = 0.15
-    anchor_eta_single: float = 0.30
-    anchor_eta_joint: float = 0.30
+    
+    anchor_weight_low: float = 0.0
+    anchor_weight_mean: float = 1
+    anchor_weight_high: float = 0.0
+    
+    #anchor的占比
+    anchor_eta_single: float = 0.2
+    anchor_eta_joint: float = 0.2
     anchor_joint_theta: float = 0.50
     anchor_lambda_plus: float = 1.0
     anchor_lambda_minus: float = 2.0
@@ -62,6 +63,7 @@ class ABMConfig:
     shock_std: float = 15.0
 
     beta_base: float = 1.0
+    #价格敏感度
     beta_range: Tuple[float, float] = (0.8, 1.2)
 
     enable_perturbation: bool = False

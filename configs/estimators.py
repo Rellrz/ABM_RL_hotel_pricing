@@ -155,7 +155,9 @@ def build_empirical_lead_time_distribution(
             errors='coerce',
         )
         df = df[df['arrival_date'].notna()].copy()
-        df['lead_time_clean'] = df['lead_time'].fillna(0).astype(int).clip(lower=0, upper=max_lead_time_days)
+        # 只保留预订窗口内的历史样本，避免把 > max_lead_time_days 的样本错误堆叠到窗口上界。
+        df['lead_time_clean'] = df['lead_time'].fillna(0).astype(int)
+        df = df[(df['lead_time_clean'] >= 0) & (df['lead_time_clean'] <= max_lead_time_days)].copy()
         df['booking_date'] = df['arrival_date'] - pd.to_timedelta(df['lead_time_clean'], unit='D')
         df = df[df['booking_date'].notna()].copy()
         df['booking_month'] = df['booking_date'].dt.month
