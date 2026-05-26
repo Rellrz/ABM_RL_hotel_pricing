@@ -58,14 +58,21 @@ def build_arrival_rate_table() -> pd.DataFrame:
 
 def build_lead_time_summary() -> dict:
     params = ABM_CONFIG.lead_time_params or {}
-    empirical = params.get("empirical_probabilities", {})
+    support = params.get("support", [])
+    empirical = params.get("probabilities", [])
     conditional = params.get("conditional_probabilities", {})
+    n_conditional_groups = 0
+    if isinstance(conditional, dict):
+        for season_map in conditional.values():
+            if isinstance(season_map, dict):
+                n_conditional_groups += len(season_map)
     return {
         "type": params.get("type"),
         "mean": params.get("mean"),
-        "max_lead_time": params.get("max_lead_time"),
+        "max_lead_time": params.get("max_days"),
+        "n_support_points": int(len(support)),
         "n_empirical_points": int(len(empirical)),
-        "n_conditional_groups": int(len(conditional)),
+        "n_conditional_groups": int(n_conditional_groups),
     }
 
 

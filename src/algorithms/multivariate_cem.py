@@ -255,6 +255,7 @@ class MultivariateCrossEntropyMethod:
             "memory_size": self.memory_size,
             "n_samples": self.n_samples,
             "n_elite": self.n_elite,
+            "cem_state_fields": ["stage_id", "season", "weekday", "near_inv_bin", "far_inv_bin"],
             "means": {str(k): v.tolist() for k, v in self.mean_table.items()},
             "covs": {str(k): v.tolist() for k, v in self.cov_table.items()},
             "state_visit_count": {str(k): int(v) for k, v in self.state_visit_count.items()},

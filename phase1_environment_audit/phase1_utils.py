@@ -20,11 +20,12 @@ from configs.experiment2 import Experiment2Config
 ARTIFACTS_DIR = PROJECT_ROOT / "phase1_environment_audit" / "artifacts"
 DIAGNOSTICS_DIR = ARTIFACTS_DIR / "diagnostics"
 FIXED_PRICE_SCAN_DIR = ARTIFACTS_DIR / "fixed_price_scan"
+CUSTOMER_UTILITY_TRACE_DIR = ARTIFACTS_DIR / "customer_utility_trace"
 CONFIG_SNAPSHOT_DIR = ARTIFACTS_DIR / "config_snapshots"
 
 
 def ensure_phase1_dirs() -> None:
-    for path in [ARTIFACTS_DIR, DIAGNOSTICS_DIR, FIXED_PRICE_SCAN_DIR, CONFIG_SNAPSHOT_DIR]:
+    for path in [ARTIFACTS_DIR, DIAGNOSTICS_DIR, FIXED_PRICE_SCAN_DIR, CUSTOMER_UTILITY_TRACE_DIR, CONFIG_SNAPSHOT_DIR]:
         path.mkdir(parents=True, exist_ok=True)
 
 

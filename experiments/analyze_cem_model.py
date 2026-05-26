@@ -18,10 +18,8 @@ STATE_COLUMNS = [
     "stage_id",
     "season",
     "weekday",
-    "bucket_inv_bin",
     "near_inv_bin",
     "far_inv_bin",
-    "inv_slope_bin",
 ]
 
 STATE_VALUE_LABELS = {
@@ -37,10 +35,8 @@ STATE_VALUE_LABELS = {
     },
     "season": {0: "low", 1: "mid", 2: "high"},
     "weekday": {0: "workday", 1: "weekend"},
-    "bucket_inv_bin": {0: "very_low", 1: "low", 2: "mid", 3: "high", 4: "very_high"},
     "near_inv_bin": {0: "very_low", 1: "low", 2: "mid", 3: "high", 4: "very_high"},
     "far_inv_bin": {0: "very_low", 1: "low", 2: "mid", 3: "high", 4: "very_high"},
-    "inv_slope_bin": {0: "strong_down", 1: "down", 2: "flat", 3: "up", 4: "strong_up"},
 }
 
 
@@ -227,7 +223,7 @@ def print_console_summary(
         print("-" * 72)
     focus_pairs = [
         ("stage_id", "far_inv_bin"),
-        ("stage_id", "inv_slope_bin"),
+        ("near_inv_bin", "far_inv_bin"),
     ]
     for dim_1, dim_2 in focus_pairs:
         sub = pair_dimension_df[

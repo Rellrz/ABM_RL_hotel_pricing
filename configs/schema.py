@@ -112,7 +112,7 @@ class RLConfig:
     cem_n_samples: int = 400
     cem_elite_frac: float = 0.3
     cem_alpha: float = 0.2
-    cem_init_strategy: str = 'blended'  # midpoint / emsrb / blended
+    cem_init_strategy: str = 'midpoint'  # midpoint / emsrb / blended
     cem_init_blend_alpha: float = 0.7
 
     cem_nn_state_dim: int = 18

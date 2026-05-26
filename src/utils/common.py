@@ -205,22 +205,19 @@ def state_to_144(state: Dict, stage_id: int) -> int:
     return discretize_bucket_state(state, stage_id=stage_id)
 
 
-def build_cem_state_key(state: Dict, stage_id: int | None = None) -> Tuple[int, ...]:
-    """为CEM构造更丰富的状态键。
-
-    结构：
-    `(stage_id, season, weekday, bucket_inv_bin, near_inv_bin, far_inv_bin, inv_slope_bin)`
-    """
+def build_cem_state_key(
+    state: Dict,
+    stage_id: int | None = None,
+) -> Tuple[int, ...]:
+    """为CEM构造固定的5维状态键。"""
     norm = enrich_bucket_state(state)
     stage = int(norm.get("stage_id", 0) if stage_id is None else stage_id)
     return (
         stage,
         int(norm.get("season", 0)),
         int(norm.get("weekday", 0)),
-        int(norm.get("bucket_inv_bin", norm.get("inventory_level", N_INVENTORY_LEVELS - 1))),
         int(norm.get("near_inv_bin", norm.get("inventory_level", N_INVENTORY_LEVELS - 1))),
         int(norm.get("far_inv_bin", norm.get("inventory_level", N_INVENTORY_LEVELS - 1))),
-        int(norm.get("inv_slope_bin", 2)),
     )
 
 
