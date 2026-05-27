@@ -101,7 +101,7 @@ def validate_abm_config(abm_config: ABMConfig) -> bool:
         print("错误：anchor权重不能小于0")
         return False
 
-    if min(abm_config.anchor_eta_single, abm_config.anchor_eta_joint) < 0:
+    if abm_config.anchor_eta < 0:
         print("错误：anchor强度参数不能小于0")
         return False
 

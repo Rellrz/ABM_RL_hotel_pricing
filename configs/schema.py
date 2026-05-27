@@ -51,9 +51,8 @@ class ABMConfig:
     anchor_weight_mean: float = 1
     anchor_weight_high: float = 0.0
     
-    #anchor的占比
-    anchor_eta_single: float = 0.2
-    anchor_eta_joint: float = 0.2
+    # anchor强度
+    anchor_eta: float = 0.1
     anchor_joint_theta: float = 0.50
     anchor_lambda_plus: float = 1.0
     anchor_lambda_minus: float = 2.0
@@ -104,9 +103,9 @@ class RLConfig:
 
     reward_hotel_ratio: float = 1
     reward_ota_ratio: float = 0
-    reward_shape_price_weight: float = 0.0            #0.3
-    reward_shape_sellthrough_weight: float = 0.0      #0.22
-    reward_shape_target_sellthrough: float = 0.0      #0.25
+    reward_shape_price_weight: float = 0.3            #0.3
+    reward_shape_sellthrough_weight: float = 0.22      #0.22
+    reward_shape_target_sellthrough: float = 0.25      #0.25
 
     cem_algorithm: str = 'cem'
     cem_n_samples: int = 400

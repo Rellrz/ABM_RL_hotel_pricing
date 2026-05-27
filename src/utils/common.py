@@ -105,20 +105,6 @@ def _clip_ratio_bin(ratio: float, n_inventory_levels: int = N_INVENTORY_LEVELS) 
     )
 
 
-def discretize_signed_slope(value: float) -> int:
-    """将库存曲线斜率离散为5档。"""
-    v = float(np.clip(value, -1.0, 1.0))
-    if v <= -0.35:
-        return 0
-    if v <= -0.10:
-        return 1
-    if v < 0.10:
-        return 2
-    if v < 0.35:
-        return 3
-    return 4
-
-
 def enrich_bucket_state(
     state: Dict,
     n_inventory_levels: int = N_INVENTORY_LEVELS,
@@ -141,40 +127,31 @@ def enrich_bucket_state(
             )
         )
     future_inventory = list(out.get("future_inventory", []) or [])
-    bucket_start = int(out.get("bucket_start", out.get("day_offset", 0)))
-    bucket_end = int(out.get("bucket_end", out.get("day_offset", bucket_start)))
+    bucket_end = int(out.get("bucket_end", out.get("day_offset", 0)))
     if future_inventory:
         last_idx = len(future_inventory) - 1
-        bucket_start = int(np.clip(bucket_start, 0, last_idx))
-        bucket_end = int(np.clip(bucket_end, bucket_start, last_idx))
+        bucket_end = int(np.clip(bucket_end, 0, last_idx))
     else:
-        bucket_start = 0
         bucket_end = 0
 
-    bucket_slice = future_inventory[bucket_start : bucket_end + 1] if future_inventory else [out.get("inventory_raw", init_inv)]
-    near_slice = future_inventory[: min(7, len(future_inventory))] if future_inventory else bucket_slice
+    fallback_slice = [out.get("inventory_raw", init_inv)]
+    near_slice = future_inventory[: min(7, len(future_inventory))] if future_inventory else fallback_slice
     far_anchor = min(max(30, bucket_end + 1), len(future_inventory) - 1) if future_inventory else 0
     far_slice = (
         future_inventory[far_anchor:]
         if future_inventory and far_anchor < len(future_inventory)
         else future_inventory[-min(30, len(future_inventory)) :]
         if future_inventory
-        else bucket_slice
+        else fallback_slice
     )
 
-    bucket_inv_ratio = _mean_ratio(bucket_slice, initial_inventory=init_inv)
     near_inv_ratio = _mean_ratio(near_slice, initial_inventory=init_inv)
     far_inv_ratio = _mean_ratio(far_slice, initial_inventory=init_inv)
-    inv_slope = near_inv_ratio - far_inv_ratio
 
-    out["bucket_inv_ratio"] = float(bucket_inv_ratio)
     out["near_inv_ratio"] = float(near_inv_ratio)
     out["far_inv_ratio"] = float(far_inv_ratio)
-    out["bucket_inv_bin"] = int(_clip_ratio_bin(bucket_inv_ratio, n_inventory_levels=n_inventory_levels))
     out["near_inv_bin"] = int(_clip_ratio_bin(near_inv_ratio, n_inventory_levels=n_inventory_levels))
     out["far_inv_bin"] = int(_clip_ratio_bin(far_inv_ratio, n_inventory_levels=n_inventory_levels))
-    out["inv_slope"] = float(inv_slope)
-    out["inv_slope_bin"] = int(discretize_signed_slope(inv_slope))
     return out
 
 
@@ -254,11 +231,11 @@ def compute_reward_shaping(
         }
 
     norm = enrich_bucket_state(state)
-    bucket_inv_ratio = float(np.clip(norm.get("bucket_inv_ratio", norm.get("inventory_ratio", 1.0)), 0.0, 1.0))
-    near_inv_ratio = float(np.clip(norm.get("near_inv_ratio", bucket_inv_ratio), 0.0, 1.0))
-    far_inv_ratio = float(np.clip(norm.get("far_inv_ratio", bucket_inv_ratio), 0.0, 1.0))
+    inventory_ratio = float(np.clip(norm.get("inventory_ratio", 1.0), 0.0, 1.0))
+    near_inv_ratio = float(np.clip(norm.get("near_inv_ratio", inventory_ratio), 0.0, 1.0))
+    far_inv_ratio = float(np.clip(norm.get("far_inv_ratio", inventory_ratio), 0.0, 1.0))
 
-    scarcity = float(np.clip(1.0 - bucket_inv_ratio, 0.0, 1.0))
+    scarcity = float(np.clip(1.0 - near_inv_ratio, 0.0, 1.0))
     near_tightness = float(np.clip(far_inv_ratio - near_inv_ratio, 0.0, 1.0))
     pressure = float(np.clip(0.6 * scarcity + 0.4 * near_tightness, 0.0, 1.0))
 

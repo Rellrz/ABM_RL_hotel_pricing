@@ -14,7 +14,6 @@ import pandas as pd
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
 from mesa import Agent, Model
-from mesa.time import RandomActivation
 from mesa.datacollection import DataCollector
 import warnings
 from configs.config import ABM_CONFIG
@@ -64,7 +63,7 @@ class CustomerAgent(Agent):
         self.profile = profile
         self.has_booked = False
         self.booking_record: Optional[BookingRecord] = None
-        self.last_decision_details: Dict[str, object] = {}
+        self.last_decision_details: Optional[Dict[str, object]] = None
 
     def _anchor_value(self, price_gap: float) -> float:
         lambda_plus = float(max(0.0, getattr(self.model.params, 'anchor_lambda_plus', 1.0)))
@@ -79,20 +78,20 @@ class CustomerAgent(Agent):
 
         del channel
         price = float(price)
+        anchor_eta = float(max(0.0, getattr(self.model.params, 'anchor_eta', 0.30)))
         customer_type = self.profile.customer_type
         if customer_type == 'online_only':
-            eta_single = float(max(0.0, getattr(self.model.params, 'anchor_eta_single', 0.30)))
             irp_single = float(reference_prices.get('single', price))
-            return float(eta_single * self._anchor_value(irp_single - price))
+            return float(anchor_eta * self._anchor_value(irp_single - price))
 
-        eta_joint = float(max(0.0, getattr(self.model.params, 'anchor_eta_joint', 0.30)))
         irp_joint = float(reference_prices.get('joint', price))
-        return float(eta_joint * self._anchor_value(irp_joint - price))
+        return float(anchor_eta * self._anchor_value(irp_joint - price))
         
     def evaluate_booking_utility(
         self,
         price: float,
         current_day: int,
+        reference_prices: Dict[str, float],
         discount_ratio: float = 1.0,
         channel: str = 'online',
     ) -> float:
@@ -112,9 +111,6 @@ class CustomerAgent(Agent):
         # 经济盈余效用：β * (WTP - P)
         economic_surplus = self.profile.price_sensitivity * ((self.profile.wtp * discount_ratio) - price)
         
-        reference_prices = self.model.compute_anchor_reference_prices(
-            customer_type=self.profile.customer_type,
-        )
         anchor_utility = self._compute_anchor_utility(
             channel=channel,
             price=float(price),
@@ -137,7 +133,13 @@ class CustomerAgent(Agent):
         
         return utility
     
-    def make_booking_decision(self, online_price: float, offline_price: float, current_day: int) -> bool:
+    def make_booking_decision(
+        self,
+        online_price: float,
+        offline_price: float,
+        current_day: int,
+        anchor_reference_prices: Dict[str, Dict[str, float]],
+    ) -> bool:
         """
         做出预订决策
         
@@ -156,6 +158,7 @@ class CustomerAgent(Agent):
             online_utility = self.evaluate_booking_utility(
                 online_price,
                 current_day,
+                reference_prices=anchor_reference_prices['online_only'],
                 discount_ratio=self.model.params.online_discount_ratio,
                 channel='online',
             )
@@ -164,12 +167,14 @@ class CustomerAgent(Agent):
             online_utility = self.evaluate_booking_utility(
                 online_price,
                 current_day,
+                reference_prices=anchor_reference_prices['omnichannel'],
                 discount_ratio=self.model.params.online_discount_ratio,
                 channel='online',
             )
             offline_utility = self.evaluate_booking_utility(
                 offline_price,
                 current_day,
+                reference_prices=anchor_reference_prices['omnichannel'],
                 channel='offline',
             )
         
@@ -189,15 +194,18 @@ class CustomerAgent(Agent):
 
         threshold = self.model.params.booking_threshold
         decision_pass = bool(utility > threshold)
-        self.last_decision_details = {
-            'online_utility': float(online_utility),
-            'offline_utility': float(np.nan if offline_utility is None else offline_utility),
-            'chosen_channel': str(chosen_channel),
-            'chosen_price': float(price),
-            'chosen_utility': float(utility),
-            'booking_threshold': float(threshold),
-            'passed_utility_threshold': decision_pass,
-        }
+        if bool(getattr(self.model, "trace_customer_utility", False)):
+            self.last_decision_details = {
+                'online_utility': float(online_utility),
+                'offline_utility': float(np.nan if offline_utility is None else offline_utility),
+                'chosen_channel': str(chosen_channel),
+                'chosen_price': float(price),
+                'chosen_utility': float(utility),
+                'booking_threshold': float(threshold),
+                'passed_utility_threshold': decision_pass,
+            }
+        else:
+            self.last_decision_details = None
         # 做出决策
         if decision_pass:
             self.has_booked = True
@@ -322,8 +330,6 @@ class HotelABMModel(Model):
         self.params = ABM_CONFIG
         
         # 初始化调度器，随机策略
-        self.schedule = RandomActivation(self)
-        
         # 当前仿真日期
         self.current_day = 0
         
@@ -351,18 +357,28 @@ class HotelABMModel(Model):
         self.daily_stats: List[Dict] = []
         self.trace_customer_utility = False
         self.customer_utility_trace: List[Dict] = []
+        self.total_customers_generated = 0
+        self.total_bookings_count = 0
+        self.total_cancellations_count = 0
+        self._calendar_feature_cache: Dict[int, Tuple[int, int, int]] = {}
         
         # 数据收集器
-        self.datacollector = DataCollector(
+        self.datacollector = self._build_datacollector()
+
+    def _build_datacollector(self) -> DataCollector:
+        return DataCollector(
             model_reporters={
-                "total_customers": lambda m: m.schedule.get_agent_count(),
-                "total_bookings": lambda m: len([b for b in m.booking_history if not b.is_canceled]),
-                "total_cancellations": lambda m: len([b for b in m.booking_history if b.is_canceled]),
+                "total_customers": lambda m: m.total_customers_generated,
+                "total_bookings": lambda m: m.total_bookings_count,
+                "total_cancellations": lambda m: m.total_cancellations_count,
                 "active_bookings": lambda m: len(m.active_bookings),
             }
         )
 
     def _calendar_features(self, current_day: int) -> Tuple[int, int, int]:
+        cached = self._calendar_feature_cache.get(current_day)
+        if cached is not None:
+            return cached
         month = (current_day // 30) % 12 + 1
         if month in [11, 12, 1, 2]:
             season = 0
@@ -371,7 +387,9 @@ class HotelABMModel(Model):
         else:
             season = 1
         is_weekend = 1 if (current_day % 7) in [5, 6] else 0
-        return month, season, is_weekend
+        features = (month, season, is_weekend)
+        self._calendar_feature_cache[current_day] = features
+        return features
 
     def _ou_step(self, x: float, theta: float, sigma: float) -> float:
         return (1.0 - float(theta)) * float(x) + float(sigma) * float(self.rng.normal())
@@ -479,7 +497,7 @@ class HotelABMModel(Model):
         if not bool(getattr(self, "trace_customer_utility", False)):
             return
 
-        decision = dict(getattr(customer, "last_decision_details", {}) or {})
+        decision = customer.last_decision_details or {}
         self.customer_utility_trace.append(
             {
                 'current_day': int(current_day),
@@ -508,29 +526,30 @@ class HotelABMModel(Model):
         )
 
 
-    def compute_anchor_reference_prices(self, customer_type: str) -> Dict[str, float]:
+    def build_daily_anchor_reference_prices(self) -> Dict[str, Dict[str, float]]:
         if not bool(getattr(self.params, 'anchor_enabled', False)):
-            return {'enabled': False}
-
-        if customer_type == 'online_only':
-            prices = self._get_price_calendar('online')
-            irp_single = self._compute_internal_reference_price(prices)
             return {
-                'enabled': True,
-                'single': float(irp_single),
+                'online_only': {'enabled': False},
+                'omnichannel': {'enabled': False},
             }
 
         prices_on = self._get_price_calendar('online')
-        prices_off = self._get_price_calendar('offline')
         irp_on = self._compute_internal_reference_price(prices_on)
+        prices_off = self._get_price_calendar('offline')
         irp_off = self._compute_internal_reference_price(prices_off)
         theta = float(np.clip(getattr(self.params, 'anchor_joint_theta', 0.50), 0.0, 1.0))
         irp_joint = theta * irp_on + (1.0 - theta) * irp_off
         return {
-            'enabled': True,
-            'online': float(irp_on),
-            'offline': float(irp_off),
-            'joint': float(irp_joint),
+            'online_only': {
+                'enabled': True,
+                'single': float(irp_on),
+            },
+            'omnichannel': {
+                'enabled': True,
+                'online': float(irp_on),
+                'offline': float(irp_off),
+                'joint': float(irp_joint),
+            },
         }
     
     def generate_daily_customers(self, current_day: int) -> List[CustomerAgent]:
@@ -554,6 +573,7 @@ class HotelABMModel(Model):
         
         # 从泊松分布采样当日客户数量
         num_customers = int(self.rng.poisson(lambda_eff))
+        self.total_customers_generated += num_customers
         
         # 生成客户
         customers = []
@@ -567,9 +587,6 @@ class HotelABMModel(Model):
             # 创建客户智能体
             customer = CustomerAgent(customer_id, self, profile)
             customers.append(customer)
-            
-            # 添加到调度器
-            self.schedule.add(customer)
         
         return customers
     
@@ -679,6 +696,8 @@ class HotelABMModel(Model):
             当日统计数据
         """
         del max_inventory
+        anchor_reference_prices = self.build_daily_anchor_reference_prices()
+
         # 生成当日客户
         daily_customers = self.generate_daily_customers(self.current_day)
         
@@ -694,10 +713,10 @@ class HotelABMModel(Model):
         hotel_marginal_cost = 0.0
         
         # 按day_offset统计预订信息（用于强化学习更新）
-        bookings_by_day_offset = [
-            {'day_offset': i, 'bookings_online': 0, 'bookings_offline': 0, 'revenue_online': 0.0, 'revenue_offline': 0.0}
-            for i in range(self.booking_window_days)
-        ]
+        bookings_online_by_offset = [0] * self.booking_window_days
+        bookings_offline_by_offset = [0] * self.booking_window_days
+        revenue_online_by_offset = [0.0] * self.booking_window_days
+        revenue_offline_by_offset = [0.0] * self.booking_window_days
         
         # 客户决策阶段
         for customer in daily_customers:
@@ -713,7 +732,12 @@ class HotelABMModel(Model):
 
             # 做出预订决策
             inventory_before = int(self.daily_available_rooms[target_date])
-            if customer.make_booking_decision(online_price, offline_price, self.current_day):
+            if customer.make_booking_decision(
+                online_price,
+                offline_price,
+                self.current_day,
+                anchor_reference_prices,
+            ):
                 target_date = customer.booking_record.target_date
                 
                 # ✅ 正确的库存检查：检查目标日期的库存
@@ -723,6 +747,7 @@ class HotelABMModel(Model):
                     
                     self.active_bookings.append(customer.booking_record)
                     self.booking_history.append(customer.booking_record)
+                    self.total_bookings_count += 1
                     
                     # 统计总预订量
                     if customer.booking_record.customer_type == 'online':
@@ -743,11 +768,11 @@ class HotelABMModel(Model):
                     # 统计按day_offset分组的预订信息
                     if 0 <= days_ahead < self.booking_window_days:
                         if customer.booking_record.customer_type == 'online':
-                            bookings_by_day_offset[days_ahead]['bookings_online'] += 1
-                            bookings_by_day_offset[days_ahead]['revenue_online'] += hotel_net_online
+                            bookings_online_by_offset[days_ahead] += 1
+                            revenue_online_by_offset[days_ahead] += hotel_net_online
                         else:
-                            bookings_by_day_offset[days_ahead]['bookings_offline'] += 1
-                            bookings_by_day_offset[days_ahead]['revenue_offline'] += hotel_net_offline
+                            bookings_offline_by_offset[days_ahead] += 1
+                            revenue_offline_by_offset[days_ahead] += hotel_net_offline
                     self._record_customer_utility_trace(
                         customer=customer,
                         current_day=self.current_day,
@@ -863,6 +888,16 @@ class HotelABMModel(Model):
         gross_revenue = gross_revenue_hotel
         #net_revenue = gross_revenue - cancellation_refund  # ✅ 净收益 = 新预订收益 - 取消退款
         net_revenue = revenue_online + revenue_offline
+        bookings_by_day_offset = [
+            {
+                'day_offset': i,
+                'bookings_online': bookings_online_by_offset[i],
+                'bookings_offline': bookings_offline_by_offset[i],
+                'revenue_online': revenue_online_by_offset[i],
+                'revenue_offline': revenue_offline_by_offset[i],
+            }
+            for i in range(self.booking_window_days)
+        ]
 
         daily_stat = {
             'day': self.current_day,
@@ -947,15 +982,11 @@ class HotelABMModel(Model):
         self.booking_history = []
         self.daily_stats = []
         self.customer_utility_trace = []
-        self.schedule = RandomActivation(self)
-        self.datacollector = DataCollector(
-            model_reporters={
-                "total_customers": lambda m: m.schedule.get_agent_count(),
-                "total_bookings": lambda m: len([b for b in m.booking_history if not b.is_canceled]),
-                "total_cancellations": lambda m: len([b for b in m.booking_history if b.is_canceled]),
-                "active_bookings": lambda m: len(m.active_bookings),
-            }
-        )
+        self.total_customers_generated = 0
+        self.total_bookings_count = 0
+        self.total_cancellations_count = 0
+        self._calendar_feature_cache = {}
+        self.datacollector = self._build_datacollector()
     
     def get_statistics(self) -> pd.DataFrame:
         """
@@ -974,5 +1005,4 @@ class HotelABMModel(Model):
         """
         模型的一步（由Mesa框架调用）
         """
-        self.schedule.step()
         self.datacollector.collect(self)
