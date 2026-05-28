@@ -147,16 +147,14 @@ class RLConfig:
 @dataclass
 class EnvConfig:
     """酒店环境参数"""
-    initial_inventory: int = 70
-    max_inventory: int = 70
-    min_inventory: int = 0
+    initial_inventory: int = 150
     booking_window_days: int = 91
 
 
 @dataclass
 class SimulationConfig:
     """系统模拟和评估参数"""
-    default_days: int = 90
+    default_days: int = 100
     default_start_date: str = '2017-01-01'
     evaluation_episodes: int = 10
     results_path: str = field(default_factory=lambda: os.path.join(PROJECT_ROOT, '04_结果输出', 'simulation_results'))

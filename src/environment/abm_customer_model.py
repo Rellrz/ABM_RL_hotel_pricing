@@ -682,20 +682,17 @@ class HotelABMModel(Model):
     
     def simulate_day(self, 
                      price_online: float, 
-                     price_offline: float,
-                     max_inventory: int = 226) -> Dict:
+                     price_offline: float) -> Dict:
         """
         模拟一天的酒店运营
         
         Args:
             price_online: 线上渠道报价
             price_offline: 线下渠道报价
-            max_inventory: 最大库存
             
         Returns:
             当日统计数据
         """
-        del max_inventory
         anchor_reference_prices = self.build_daily_anchor_reference_prices()
 
         # 生成当日客户

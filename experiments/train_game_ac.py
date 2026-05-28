@@ -36,7 +36,6 @@ def _run_one_capacity(capacity: int, args_dict: dict) -> dict:
         RL_CONFIG.subsidy_ratio_max = args_dict['subsidy_ratio_max']
 
         ENV_CONFIG.initial_inventory = capacity
-        ENV_CONFIG.max_inventory = capacity
 
         hotel_agent, ota_agent, rewards_hotel, rewards_ota, episode_info = train_game_system(
             historical_data=historical_data,

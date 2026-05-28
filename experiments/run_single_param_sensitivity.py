@@ -21,10 +21,10 @@ conda run -n abm python experiments/run_single_param_sensitivity.py \
   --tail-window 30 \
   --n-jobs 4
 
-多参数-自定义组合
+多参数-自定义组合（每个参数组合需要有引号引起来）
 conda run -n abm python experiments/run_single_param_sensitivity.py \
-  --combo RL_CONFIG.reward_shape_price_weight=0.0;RL_CONFIG.reward_shape_sellthrough_weight=0.0;RL_CONFIG.reward_shape_target_sellthrough=0 \
-  --combo RL_CONFIG.reward_shape_price_weight=0.3;RL_CONFIG.reward_shape_sellthrough_weight=0.22;RL_CONFIG.reward_shape_target_sellthrough=0.25 \
+  --combo 'RL_CONFIG.reward_shape_price_weight=0.0;RL_CONFIG.reward_shape_sellthrough_weight=0.0;RL_CONFIG.reward_shape_target_sellthrough=0' \
+  --combo 'RL_CONFIG.reward_shape_price_weight=0.3;RL_CONFIG.reward_shape_sellthrough_weight=0.22;RL_CONFIG.reward_shape_target_sellthrough=0.25' \
   --episodes 100 \
   --tail-window 30 \
   --n-jobs 2

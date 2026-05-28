@@ -300,7 +300,6 @@ class HotelEnvironment:
         abm_stat = self.abm_model.simulate_day(
             price_online=price_windows_online[0],  # 今天的线上价格
             price_offline=price_windows_offline[0],  # 今天的线下价格
-            max_inventory=self.initial_inventory
         )
         
         actual_bookings = abm_stat['total_new_bookings']

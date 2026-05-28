@@ -38,7 +38,7 @@ conda run -n abm python phase1_environment_audit/run_environment_diagnostics.py 
 运行：
 
 ```bash
-conda run -n abm python phase1_environment_audit/run_fixed_price_scan.py --mode debug --price-min 60 --price-max 160 --price-step 10
+conda run -n abm python phase1_environment_audit/run_fixed_price_scan.py --mode debug --price-min 80 --price-max 120 --price-step 5
 ```
 
 检查输出：
