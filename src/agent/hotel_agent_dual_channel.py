@@ -85,6 +85,9 @@ class HotelAgentDualChannel:
         self.cem_joint = None
         self.cem_online = None
         self.cem_offline = None
+        cem_state_fields = ["stage_id", "season", "weekday", "near_inv_bin", "far_inv_bin"]
+        if bool(getattr(RL_CONFIG, "enable_pre_repricing_anchor_state", True)):
+            cem_state_fields.append("pre_repricing_anchor_bin")
 
         # 根据配置选择算法
         if self.algorithm_type == 'cem_nn':
@@ -132,6 +135,7 @@ class HotelAgentDualChannel:
                 std_decay=std_decay,
                 memory_size=RL_CONFIG.cem_memory_size,
                 initial_mean_provider=initial_mean_provider,
+                state_fields=cem_state_fields,
             )
         
         # OTA补贴历史（用于预测OTA行为）

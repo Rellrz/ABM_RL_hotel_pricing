@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import List
 
@@ -16,15 +17,16 @@ def _prep_style() -> None:
     sns.set_style("whitegrid")
 
 
-def _save_dual(fig, base_path_no_ext: Path) -> None:
+def _save_dual(fig, base_path_no_ext: Path, timestamp: str) -> None:
     base_path_no_ext.parent.mkdir(parents=True, exist_ok=True)
+    output_base = base_path_no_ext.with_name(f"{base_path_no_ext.name}_{timestamp}")
     fig.tight_layout()
-    fig.savefig(base_path_no_ext.with_suffix(".pdf"), dpi=300)
-    fig.savefig(base_path_no_ext.with_suffix(".png"), dpi=300)
+    fig.savefig(output_base.with_suffix(".pdf"), dpi=300)
+    fig.savefig(output_base.with_suffix(".png"), dpi=300)
     plt.close(fig)
 
 
-def plot_search_trajectory(trials_df: pd.DataFrame, out_dir: Path) -> None:
+def plot_search_trajectory(trials_df: pd.DataFrame, out_dir: Path, timestamp: str) -> None:
     if trials_df is None or len(trials_df) == 0:
         return
     _prep_style()
@@ -36,10 +38,10 @@ def plot_search_trajectory(trials_df: pd.DataFrame, out_dir: Path) -> None:
     ax.set_xlabel("Trial ID")
     ax.set_ylabel("Objective Score")
     ax.legend()
-    _save_dual(fig, out_dir / "search_trajectory")
+    _save_dual(fig, out_dir / "search_trajectory", timestamp=timestamp)
 
 
-def plot_param_sensitivity(trials_df: pd.DataFrame, out_dir: Path) -> None:
+def plot_param_sensitivity(trials_df: pd.DataFrame, out_dir: Path, timestamp: str) -> None:
     if trials_df is None or len(trials_df) == 0:
         return
     _prep_style()
@@ -48,9 +50,8 @@ def plot_param_sensitivity(trials_df: pd.DataFrame, out_dir: Path) -> None:
         "ppo_learning_rate",
         "ppo_clip_range",
         "ppo_gae_lambda",
-        "ppo_slope_span_ratio",
     ]
-    fig, axes = plt.subplots(2, 3, figsize=(12, 7))
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7))
     axes = axes.flatten()
     for idx, p in enumerate(params):
         ax = axes[idx]
@@ -59,11 +60,10 @@ def plot_param_sensitivity(trials_df: pd.DataFrame, out_dir: Path) -> None:
             ax.set_xscale("log")
         ax.set_xlabel(p)
         ax.set_ylabel("Mean Eval Hotel Revenue")
-    axes[5].axis("off")
-    _save_dual(fig, out_dir / "param_sensitivity")
+    _save_dual(fig, out_dir / "param_sensitivity", timestamp=timestamp)
 
 
-def plot_pareto(trials_df: pd.DataFrame, out_dir: Path) -> None:
+def plot_pareto(trials_df: pd.DataFrame, out_dir: Path, timestamp: str) -> None:
     if trials_df is None or len(trials_df) == 0:
         return
     _prep_style()
@@ -80,7 +80,7 @@ def plot_pareto(trials_df: pd.DataFrame, out_dir: Path) -> None:
     )
     ax.set_xlabel("Tail Drawdown")
     ax.set_ylabel("Mean Eval Hotel Revenue")
-    _save_dual(fig, out_dir / "stability_performance_pareto")
+    _save_dual(fig, out_dir / "stability_performance_pareto", timestamp=timestamp)
 
 
 def _topk_trial_ids(trials_df: pd.DataFrame, k: int = 5) -> List[int]:
@@ -91,7 +91,7 @@ def _topk_trial_ids(trials_df: pd.DataFrame, k: int = 5) -> List[int]:
     return use.sort_values("Score", ascending=False).head(k)["TrialID"].astype(int).tolist()
 
 
-def plot_topk_learning_curves(trials_df: pd.DataFrame, training_df: pd.DataFrame, out_dir: Path, k: int = 5) -> None:
+def plot_topk_learning_curves(trials_df: pd.DataFrame, training_df: pd.DataFrame, out_dir: Path, timestamp: str, k: int = 5) -> None:
     if trials_df is None or training_df is None or len(trials_df) == 0 or len(training_df) == 0:
         return
     top_ids = _topk_trial_ids(trials_df=trials_df, k=k)
@@ -112,10 +112,10 @@ def plot_topk_learning_curves(trials_df: pd.DataFrame, training_df: pd.DataFrame
     ax.set_xlabel("Episode")
     ax.set_ylabel("Episode Hotel Revenue")
     ax.set_title(f"Top-{k} Trial Learning Curves")
-    _save_dual(fig, out_dir / "topk_learning_curves")
+    _save_dual(fig, out_dir / "topk_learning_curves", timestamp=timestamp)
 
 
-def plot_best_vs_baseline(eval_df: pd.DataFrame, best_trial_id: int, baseline_trial_id: int, out_dir: Path) -> None:
+def plot_best_vs_baseline(eval_df: pd.DataFrame, best_trial_id: int, baseline_trial_id: int, out_dir: Path, timestamp: str) -> None:
     if eval_df is None or len(eval_df) == 0:
         return
     use = eval_df[eval_df["TrialID"].isin([int(best_trial_id), int(baseline_trial_id)])].copy()
@@ -140,10 +140,10 @@ def plot_best_vs_baseline(eval_df: pd.DataFrame, best_trial_id: int, baseline_tr
         ax.bar(agg["Group"], agg["mean"], yerr=agg["ci95"], capsize=4, alpha=0.85)
         ax.set_title(label)
         ax.tick_params(axis="x", rotation=15)
-    _save_dual(fig, out_dir / "best_vs_baseline")
+    _save_dual(fig, out_dir / "best_vs_baseline", timestamp=timestamp)
 
 
-def plot_drawdown_diagnostics(training_df: pd.DataFrame, best_trial_id: int, out_dir: Path) -> None:
+def plot_drawdown_diagnostics(training_df: pd.DataFrame, best_trial_id: int, out_dir: Path, timestamp: str) -> None:
     if training_df is None or len(training_df) == 0:
         return
     use = training_df[training_df["TrialID"] == int(best_trial_id)].copy()
@@ -168,7 +168,7 @@ def plot_drawdown_diagnostics(training_df: pd.DataFrame, best_trial_id: int, out
     ax.set_xlabel("Episode")
     ax.set_ylabel("Episode Hotel Revenue")
     ax.legend()
-    _save_dual(fig, out_dir / "drawdown_diagnostics")
+    _save_dual(fig, out_dir / "drawdown_diagnostics", timestamp=timestamp)
 
 
 def generate_tuning_figures(
@@ -180,9 +180,10 @@ def generate_tuning_figures(
     baseline_trial_id: int,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
-    plot_search_trajectory(trials_df=trials_df, out_dir=out_dir)
-    plot_param_sensitivity(trials_df=trials_df, out_dir=out_dir)
-    plot_pareto(trials_df=trials_df, out_dir=out_dir)
-    plot_topk_learning_curves(trials_df=trials_df, training_df=training_df, out_dir=out_dir, k=5)
-    plot_best_vs_baseline(eval_df=eval_df, best_trial_id=best_trial_id, baseline_trial_id=baseline_trial_id, out_dir=out_dir)
-    plot_drawdown_diagnostics(training_df=training_df, best_trial_id=best_trial_id, out_dir=out_dir)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    plot_search_trajectory(trials_df=trials_df, out_dir=out_dir, timestamp=timestamp)
+    plot_param_sensitivity(trials_df=trials_df, out_dir=out_dir, timestamp=timestamp)
+    plot_pareto(trials_df=trials_df, out_dir=out_dir, timestamp=timestamp)
+    plot_topk_learning_curves(trials_df=trials_df, training_df=training_df, out_dir=out_dir, timestamp=timestamp, k=5)
+    plot_best_vs_baseline(eval_df=eval_df, best_trial_id=best_trial_id, baseline_trial_id=baseline_trial_id, out_dir=out_dir, timestamp=timestamp)
+    plot_drawdown_diagnostics(training_df=training_df, best_trial_id=best_trial_id, out_dir=out_dir, timestamp=timestamp)

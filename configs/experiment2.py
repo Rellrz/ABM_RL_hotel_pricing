@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 import sys
 from typing import Dict, List
@@ -85,11 +86,12 @@ class Experiment2Config:
     ppo_norm_reward: bool = True
     ppo_clip_obs: float = 10.0
     ppo_clip_reward: float = 10.0
+    ppo_reward_mode: str = "scaled_raw_daily"
     ppo_reward_scale: float = 1e4
+    ppo_shaped_reward_weight: float = 0.5
     ppo_net_arch: tuple = (256, 256)
     ppo_use_sde: bool = False
     ppo_device: str = "mps"  # 可选: "cpu" / "mps" / "cuda" / "auto"
-    ppo_slope_span_ratio: float = 0.4  # 兼容旧配置，当前无先验 PPO 不再使用
     ppo_log_std_init: float = -0.2  # std≈0.82, 让初期在[-1,1]动作空间里充分探索
 
     # -----------------------------
@@ -105,6 +107,7 @@ class Experiment2Config:
     # -----------------------------
     # 路径
     # -----------------------------
+    run_timestamp: str = ""
     training_csv_path: Path = RESULTS_DIR / "experiment2_training.csv"
     evaluation_csv_path: Path = RESULTS_DIR / "experiment2_post_eval.csv"
     summary_json_path: Path = RESULTS_DIR / "experiment2_summary.json"
@@ -127,9 +130,20 @@ class Experiment2Config:
     tuning_summary_json_path: Path = TUNING_DIR / "ppo_tuning_summary.json"
 
     def __post_init__(self) -> None:
+        if not self.run_timestamp:
+            self.run_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.learning_curve_hotel_pdf = self._timestamped_figure_path(self.learning_curve_hotel_pdf)
+        self.learning_curve_ota_pdf = self._timestamped_figure_path(self.learning_curve_ota_pdf)
+        self.learning_curve_system_pdf = self._timestamped_figure_path(self.learning_curve_system_pdf)
+        self.eval_bar_hotel_pdf = self._timestamped_figure_path(self.eval_bar_hotel_pdf)
+        self.eval_bar_ota_pdf = self._timestamped_figure_path(self.eval_bar_ota_pdf)
+        self.eval_bar_system_pdf = self._timestamped_figure_path(self.eval_bar_system_pdf)
         # 默认让PPO rollout长度与episode长度一致，避免跨年episode被中途切成多段更新。
         if self.ppo_n_steps is None:
             self.ppo_n_steps = int(self.days_per_episode)
+
+    def _timestamped_figure_path(self, path: Path) -> Path:
+        return path.with_name(f"{path.stem}_{self.run_timestamp}{path.suffix}")
 
     def ensure_dirs(self) -> None:
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)

@@ -75,11 +75,28 @@ class PPOBucketEnv(gym.Env):
         obs = self.sim.get_obs_vector_for_ppo()
         return obs, {}
 
+    def _select_reward(self, day_result) -> float:
+        mode = str(getattr(self.config, "ppo_reward_mode", "scaled_raw_daily")).strip().lower()
+        scale = float(max(1e-8, getattr(self.config, "ppo_reward_scale", 1.0)))
+        info = day_result.info
+        if mode == "raw_daily":
+            return float(day_result.reward_hotel)
+        if mode == "shaped_bucket":
+            return float(info.get("ppo_shaped_bucket_reward", 0.0)) / scale
+        if mode == "mixed":
+            shaped = float(info.get("ppo_shaped_bucket_reward", 0.0))
+            weight = float(getattr(self.config, "ppo_shaped_reward_weight", 0.5))
+            return (float(day_result.reward_hotel) + weight * shaped) / scale
+        return float(day_result.reward_hotel) / scale
+
     def step(self, action):
         stage_actions = self._decode_action(action)
         day_result = self.sim.step_day(stage_actions)
         obs = self.sim.get_obs_vector_for_ppo()
-        reward = float(day_result.reward_hotel)
+        reward = self._select_reward(day_result)
         terminated = bool(day_result.done)
         truncated = False
-        return obs, reward, terminated, truncated, day_result.info
+        info = dict(day_result.info)
+        info["ppo_env_reward"] = float(reward)
+        info["ppo_reward_mode"] = str(getattr(self.config, "ppo_reward_mode", "scaled_raw_daily"))
+        return obs, reward, terminated, truncated, info

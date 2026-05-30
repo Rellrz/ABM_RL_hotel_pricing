@@ -303,9 +303,20 @@ class BucketPricingSimulator:
         else:
             self._rotate_offsets()
 
+        shaped_bucket_reward = 0.0
+        shaped_bucket_reward_by_stage = [0.0] * self.n_stages
+        for ev in update_events:
+            ev_reward = float(ev.reward)
+            shaped_bucket_reward += ev_reward
+            sid = int(ev.state.get("stage_id", 0)) if isinstance(ev.state, dict) else 0
+            if 0 <= sid < self.n_stages:
+                shaped_bucket_reward_by_stage[sid] += ev_reward
+
         info = dict(info)
         info["reward_hotel_by_stage"] = by_stage_hotel
         info["reward_ota_by_stage"] = by_stage_ota
+        info["ppo_shaped_bucket_reward"] = float(shaped_bucket_reward)
+        info["ppo_shaped_bucket_reward_by_stage"] = shaped_bucket_reward_by_stage
         info["update_events"] = update_events
         return DayResult(
             reward_hotel=float(reward_hotel),

@@ -18,8 +18,6 @@ class SpaceBounds:
     clip_high: float
     gae_low: float
     gae_high: float
-    slope_low: float
-    slope_high: float
     n_steps_choices: List[int]
 
 
@@ -32,8 +30,6 @@ GLOBAL_BOUNDS = SpaceBounds(
     clip_high=0.3,
     gae_low=0.95,
     gae_high=0.99,
-    slope_low=0.12,
-    slope_high=0.25,
     n_steps_choices=[256, 365, 512],
 )
 
@@ -45,7 +41,6 @@ def suggest_ppo_params(trial, bounds: SpaceBounds | None = None) -> Dict[str, fl
         "ppo_learning_rate": float(trial.suggest_float("ppo_learning_rate", b.lr_low, b.lr_high, log=True)),
         "ppo_clip_range": float(trial.suggest_float("ppo_clip_range", b.clip_low, b.clip_high)),
         "ppo_gae_lambda": float(trial.suggest_float("ppo_gae_lambda", b.gae_low, b.gae_high)),
-        "ppo_slope_span_ratio": float(trial.suggest_float("ppo_slope_span_ratio", b.slope_low, b.slope_high)),
         "ppo_n_steps": int(trial.suggest_categorical("ppo_n_steps", b.n_steps_choices)),
     }
 
@@ -74,7 +69,6 @@ def build_refine_bounds(trials_df: pd.DataFrame, top_k: int = 6) -> SpaceBounds:
     lr_low, lr_high = _range("ppo_learning_rate", GLOBAL_BOUNDS.lr_low, GLOBAL_BOUNDS.lr_high)
     clip_low, clip_high = _range("ppo_clip_range", GLOBAL_BOUNDS.clip_low, GLOBAL_BOUNDS.clip_high)
     gae_low, gae_high = _range("ppo_gae_lambda", GLOBAL_BOUNDS.gae_low, GLOBAL_BOUNDS.gae_high)
-    slope_low, slope_high = _range("ppo_slope_span_ratio", GLOBAL_BOUNDS.slope_low, GLOBAL_BOUNDS.slope_high)
 
     n_steps = sorted(top_df["ppo_n_steps"].dropna().astype(int).unique().tolist())
     n_steps_choices = n_steps if n_steps else GLOBAL_BOUNDS.n_steps_choices
@@ -88,8 +82,6 @@ def build_refine_bounds(trials_df: pd.DataFrame, top_k: int = 6) -> SpaceBounds:
         clip_high=clip_high,
         gae_low=gae_low,
         gae_high=gae_high,
-        slope_low=slope_low,
-        slope_high=slope_high,
         n_steps_choices=n_steps_choices,
     )
 

@@ -30,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-qlearning", action="store_true")
     parser.add_argument("--skip-cem", action="store_true")
     parser.add_argument("--skip-emsrb", action="store_true")
+    parser.add_argument("--ppo-reward-mode", type=str, default=None, choices=["scaled_raw_daily", "raw_daily", "shaped_bucket", "mixed"])
+    parser.add_argument("--ppo-reward-scale", type=float, default=None)
+    parser.add_argument("--ppo-shaped-reward-weight", type=float, default=None)
     return parser
 
 
@@ -122,6 +125,12 @@ def main() -> None:
     config = Experiment2Config(run_mode=args.mode)
     if args.n_jobs is not None:
         config.n_jobs = int(args.n_jobs)
+    if args.ppo_reward_mode is not None:
+        config.ppo_reward_mode = str(args.ppo_reward_mode)
+    if args.ppo_reward_scale is not None:
+        config.ppo_reward_scale = float(args.ppo_reward_scale)
+    if args.ppo_shaped_reward_weight is not None:
+        config.ppo_shaped_reward_weight = float(args.ppo_shaped_reward_weight)
     historical_data = load_historical_data(PROJECT_ROOT)
     summary = run_experiment2(
         config=config,
