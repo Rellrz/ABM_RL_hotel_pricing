@@ -243,6 +243,17 @@ def main() -> None:
     config.ensure_dirs()
     historical_data = load_historical_data()
 
+    # 安全保护：避免嵌套ProcessPool导致macOS上挂起
+    trial_jobs = max(1, int(args.trial_jobs))
+    seed_jobs = max(1, int(args.seed_jobs))
+    if trial_jobs > 1 and seed_jobs > 1:
+        print(
+            f"[WARN] 检测到嵌套并行 trial_jobs={trial_jobs} + seed_jobs={seed_jobs}。"
+            f"为防止macOS multiprocessing挂起，自动将 seed_jobs 降为 1。"
+        )
+        seed_jobs = 1
+        args.seed_jobs = 1
+
     print("=" * 72)
     print("实验二：PPO最小调参")
     print("=" * 72)
