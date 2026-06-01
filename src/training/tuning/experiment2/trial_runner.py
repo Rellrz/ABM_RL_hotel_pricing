@@ -37,7 +37,7 @@ def run_ppo_trial(
     base_config: Experiment2Config,
     historical_data,
     trial_id: int,
-    params: Dict[str, float],
+    params: Dict[str, float | int | str],
     seeds: Iterable[int],
     train_episodes: int,
     post_eval_episodes: int,

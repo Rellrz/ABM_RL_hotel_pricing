@@ -54,11 +54,14 @@ def summarize_trial_metrics(training_df: pd.DataFrame, eval_df: pd.DataFrame) ->
     tail_drawdown = float(np.mean(per_seed_drawdown)) if per_seed_drawdown else 1.0
     train_tail_mean = float(np.mean(per_seed_tail_mean)) if per_seed_tail_mean else 0.0
 
-    # 稳定优先：高收益 + 低波动 + 低回撤
-    score = mean_eval * (1.0 - 0.8 * tail_drawdown) - 0.5 * std_eval
-    stable = bool(tail_drawdown <= 0.08)
+    # 稳定优先：高收益 + 低回撤 + 低波动
+    # drawdown_penalty: 回撤惩罚力度，10% 回撤 → 折损 20% 得分
+    drawdown_penalty = 2.0
+    cv = max(0.0, std_eval / max(1.0, mean_eval)) if mean_eval > 0 else 0.0
+    score = mean_eval * (1.0 - drawdown_penalty * tail_drawdown - 0.5 * cv)
+    stable = bool(tail_drawdown <= 0.05)
     if not stable:
-        score *= 0.95
+        score *= 0.9
 
     return {
         "MeanEvalHotelRevenue": mean_eval,
@@ -73,7 +76,7 @@ def summarize_trial_metrics(training_df: pd.DataFrame, eval_df: pd.DataFrame) ->
 def summarize_trial(
     trial_id: int,
     stage: str,
-    params: Dict[str, float],
+    params: Dict[str, float | int | str],
     training_df: pd.DataFrame,
     eval_df: pd.DataFrame,
 ) -> Tuple[Dict, Dict[str, float]]:
@@ -84,6 +87,7 @@ def summarize_trial(
         **{k: float(v) if isinstance(v, (int, float, np.floating)) else v for k, v in params.items()},
         **metrics,
     }
-    row["ppo_n_steps"] = int(params["ppo_n_steps"])
+    row["ppo_n_steps"] = int(params.get("ppo_n_steps", 256))
+    row["ppo_batch_size"] = int(params.get("ppo_batch_size", 64))
     return row, metrics
 

@@ -46,20 +46,30 @@ def plot_param_sensitivity(trials_df: pd.DataFrame, out_dir: Path, timestamp: st
         return
     _prep_style()
     params = [
-        "ppo_ent_coef",
         "ppo_learning_rate",
+        "ppo_ent_coef",
         "ppo_clip_range",
         "ppo_gae_lambda",
+        "ppo_gamma",
+        "ppo_log_std_init",
+        "ppo_shaped_reward_weight",
     ]
-    fig, axes = plt.subplots(2, 2, figsize=(10, 7))
+    log_params = {"ppo_learning_rate", "ppo_ent_coef"}
+    n = len(params)
+    ncols = 3
+    nrows = (n + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(14, 4 * nrows))
     axes = axes.flatten()
     for idx, p in enumerate(params):
         ax = axes[idx]
-        sns.scatterplot(data=trials_df, x=p, y="MeanEvalHotelRevenue", hue="TailDrawdown", ax=ax, palette="viridis")
-        if p in {"ppo_ent_coef", "ppo_learning_rate"}:
-            ax.set_xscale("log")
-        ax.set_xlabel(p)
-        ax.set_ylabel("Mean Eval Hotel Revenue")
+        if p in trials_df.columns:
+            sns.scatterplot(data=trials_df, x=p, y="MeanEvalHotelRevenue", hue="ppo_reward_mode", ax=ax, s=30, alpha=0.85)
+            if p in log_params:
+                ax.set_xscale("log")
+            ax.set_xlabel(p)
+            ax.set_ylabel("Mean Eval Hotel Revenue")
+    for idx in range(n, len(axes)):
+        axes[idx].axis("off")
     _save_dual(fig, out_dir / "param_sensitivity", timestamp=timestamp)
 
 

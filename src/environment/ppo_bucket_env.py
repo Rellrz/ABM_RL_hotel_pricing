@@ -31,7 +31,7 @@ class PPOBucketEnv(gym.Env):
             dtype=np.float32,
         )
 
-        obs_dim = config.booking_window_days + 1 + 12 + 2
+        obs_dim = 4 + 12 + 2 + 5 * self.n_stages
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
@@ -47,22 +47,15 @@ class PPOBucketEnv(gym.Env):
 
         stage_actions = []
         for sid in range(self.n_stages):
-            pon = self._denormalize_price(
-                arr[2 * sid],
-                self.config.online_price_min,
-                self.config.online_price_max,
-            )
-            poff = self._denormalize_price(
-                arr[2 * sid + 1],
-                self.config.offline_price_min,
-                self.config.offline_price_max,
-            )
+            pon = self._denormalize_price(arr[2 * sid],
+                self.config.online_price_min, self.config.online_price_max)
+            poff = self._denormalize_price(arr[2 * sid + 1],
+                self.config.offline_price_min, self.config.offline_price_max)
             stage_actions.append((float(pon), float(poff)))
         return stage_actions
 
     @staticmethod
     def _denormalize_price(value: float, low: float, high: float) -> float:
-        # 标准化动作 0 -> 价格中点；[-1,1] 均匀覆盖整个价格区间
         clipped = float(np.clip(value, -1.0, 1.0))
         return float(low + (clipped + 1.0) * 0.5 * (high - low))
 

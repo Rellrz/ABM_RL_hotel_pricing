@@ -25,7 +25,7 @@ if str(EXPERIMENT_DIR) not in sys.path:
 from configs.experiment2 import Experiment2Config, TUNING_FIGURES_DIR
 from src.training.tuning.experiment2.objective import summarize_trial
 from src.training.tuning.experiment2.report import generate_tuning_figures
-from src.training.tuning.experiment2.search_space import GLOBAL_BOUNDS, build_refine_bounds, suggest_ppo_params
+from src.training.tuning.experiment2.search_space import GLOBAL_BOUNDS, build_refine_bounds, get_tunable_param_names, suggest_ppo_params
 from src.training.tuning.experiment2.trial_runner import run_ppo_trial
 
 
@@ -58,7 +58,7 @@ def _execute_trial_task(
     trial_id: int,
     base_config: Experiment2Config,
     historical_data,
-    params: Dict[str, float],
+    params: Dict[str, float | int | str],
     seeds: List[int],
     train_episodes: int,
     post_eval_episodes: int,
@@ -285,25 +285,23 @@ def main() -> None:
     eval_df = pd.concat([coarse_eval_df, refine_eval_df], axis=0, ignore_index=True)
     best = _best_row(trials_df)
     best_trial_id = int(best["TrialID"])
-    best_params = {
-        "ppo_ent_coef": float(best["ppo_ent_coef"]),
-        "ppo_learning_rate": float(best["ppo_learning_rate"]),
-        "ppo_clip_range": float(best["ppo_clip_range"]),
-        "ppo_gae_lambda": float(best["ppo_gae_lambda"]),
-        "ppo_slope_span_ratio": float(best["ppo_slope_span_ratio"]),
-        "ppo_n_steps": int(best["ppo_n_steps"]),
-    }
+    best_params: Dict[str, float | int | str] = {}
+    for col in get_tunable_param_names():
+        if col in best:
+            val = best[col]
+            if isinstance(val, float) and col not in ("ppo_reward_mode",):
+                best_params[col] = float(val)
+            elif col in ("ppo_n_steps", "ppo_batch_size"):
+                best_params[col] = int(val)
+            else:
+                best_params[col] = val
 
-    # 最终验证：best vs baseline（同预算同seed数）
     final_seeds = list(range(1, int(args.final_seeds) + 1))
-    baseline_params = {
-        "ppo_ent_coef": float(config.ppo_ent_coef),
-        "ppo_learning_rate": float(config.ppo_learning_rate),
-        "ppo_clip_range": float(config.ppo_clip_range),
-        "ppo_gae_lambda": float(config.ppo_gae_lambda),
-        "ppo_slope_span_ratio": float(config.ppo_slope_span_ratio),
-        "ppo_n_steps": int(config.ppo_n_steps),
-    }
+    baseline_params: Dict[str, float | int | str] = {}
+    for col in get_tunable_param_names():
+        default_val = getattr(config, col, None)
+        if default_val is not None:
+            baseline_params[col] = default_val
     final_bar = tqdm(total=2, desc="[final] validation", unit="run")
     final_baseline_train, final_baseline_eval = run_ppo_trial(
         base_config=config,

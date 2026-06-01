@@ -92,6 +92,9 @@ class BucketPricingSimulator:
         self.acc_bookings_offline_by_offset = [0] * self.config.booking_window_days
         self.acc_revenue_online_by_offset = [0.0] * self.config.booking_window_days
         self.acc_revenue_offline_by_offset = [0.0] * self.config.booking_window_days
+        self.daily_bookings_per_bucket = [0.0] * self.n_stages
+        self.acc_bookings_per_bucket = [0.0] * self.n_stages
+        self.acc_bookings_per_bucket_days = 0
         return self.env.reset()
 
     def _build_stage_raw_state(self, off: int, stage_id: int) -> Dict:
@@ -112,23 +115,77 @@ class BucketPricingSimulator:
 
     def get_obs_vector_for_ppo(self) -> np.ndarray:
         st = enrich_bucket_state(self.env.get_raw_state())
-        future_inventory = np.asarray(st.get("future_inventory", [self.config.initial_inventory] * self.config.booking_window_days), dtype=np.float64)
         remaining_inventory = float(st.get("inventory_raw", self.config.initial_inventory))
+        init_inv = float(max(1.0, self.config.initial_inventory))
+        inventory_total = remaining_inventory / init_inv
+        inventory_consumed_frac = 1.0 - inventory_total
+
+        future_inventory = np.asarray(
+            st.get("future_inventory", [self.config.initial_inventory] * self.config.booking_window_days),
+            dtype=np.float64,
+        )
+        near_i = float(np.sum(future_inventory[0:14])) / max(1.0, len(future_inventory[0:14]) * init_inv)
+        far_i = float(np.sum(future_inventory[14:])) / max(1.0, len(future_inventory[14:]) * init_inv)
+        inventory_near_available = near_i
+        inventory_far_available = far_i
+
         month = int(((self.day // 30) % 12) + 1)
         month_onehot = np.zeros(12, dtype=np.float64)
         month_onehot[month - 1] = 1.0
         weekend = float(st.get("weekday", 0))
         day_norm = float(self.day % self.config.days_per_episode) / float(max(1, self.config.days_per_episode - 1))
 
+        price_online_min = float(self.config.online_price_min)
+        price_online_max = float(self.config.online_price_max)
+        price_range_online = max(1e-8, price_online_max - price_online_min)
+        price_offline_min = float(self.config.offline_price_min)
+        price_offline_max = float(self.config.offline_price_max)
+        price_range_offline = max(1e-8, price_offline_max - price_offline_min)
+
+        per_bucket_inventory = np.zeros(self.n_stages, dtype=np.float64)
+        per_bucket_online_price = np.zeros(self.n_stages, dtype=np.float64)
+        per_bucket_offline_price = np.zeros(self.n_stages, dtype=np.float64)
+        per_bucket_online_final = np.zeros(self.n_stages, dtype=np.float64)
+
+        for sid, (s_off, e_off) in enumerate(self.buckets):
+            lo = max(0, int(s_off))
+            hi = min(int(e_off) + 1, self.config.booking_window_days)
+            if lo < hi:
+                per_bucket_inventory[sid] = self._sum_offset_range(lo, hi) / init_inv
+            ref = min(int(e_off), self.config.booking_window_days - 1)
+            pon_val = float(self.price_online_base_by_offset[ref])
+            poff_val = float(self.price_offline_by_offset[ref])
+            sr_val = float(self.subsidy_ratio_by_offset[ref])
+            per_bucket_online_price[sid] = (pon_val - price_online_min) / price_range_online
+            per_bucket_offline_price[sid] = (poff_val - price_offline_min) / price_range_offline
+            final = pon_val - pon_val * self.config.commission_rate * sr_val
+            per_bucket_online_final[sid] = (final - price_online_min) / price_range_online
+
+        recent_bookings = np.asarray(self.acc_bookings_per_bucket, dtype=np.float64)
+        recent_bookings = np.clip(recent_bookings / 3.0, 0.0, 1.0)
+
         vec = np.concatenate(
             [
-                future_inventory,
-                np.array([remaining_inventory], dtype=np.float64),
+                np.array([inventory_total, inventory_consumed_frac,
+                          inventory_near_available, inventory_far_available], dtype=np.float64),
                 month_onehot,
                 np.array([weekend, day_norm], dtype=np.float64),
+                per_bucket_inventory,
+                per_bucket_online_price,
+                per_bucket_offline_price,
+                per_bucket_online_final,
+                recent_bookings,
             ]
         )
         return vec.astype(np.float32)
+
+    def _sum_offset_range(self, lo: int, hi: int) -> float:
+        st = enrich_bucket_state(self.env.get_raw_state())
+        future_inventory = np.asarray(
+            st.get("future_inventory", [self.config.initial_inventory] * self.config.booking_window_days),
+            dtype=np.float64,
+        )
+        return float(np.sum(future_inventory[lo:hi]))
 
     def _price_clipped(self, action_pair: Tuple[float, float]) -> Tuple[float, float]:
         pon = float(np.clip(action_pair[0], self.config.online_price_min, self.config.online_price_max))
@@ -276,6 +333,27 @@ class BucketPricingSimulator:
             self.acc_bookings_offline_by_offset[off] += int(bf)
             self.acc_revenue_online_by_offset[off] += revenue_online
             self.acc_revenue_offline_by_offset[off] += revenue_offline
+
+        self.daily_bookings_per_bucket = [0.0] * self.n_stages
+        for off in range(min(len(bookings), self.config.booking_window_days)):
+            bo = int(bookings[off]["bookings_online"])
+            bf = int(bookings[off]["bookings_offline"])
+            if bo == 0 and bf == 0:
+                continue
+            sid = int(self.bucket_of_offset[off])
+            self.daily_bookings_per_bucket[sid] += float(bo + bf)
+        daily_max = 5.0
+        for sid in range(self.n_stages):
+            self.daily_bookings_per_bucket[sid] = min(1.0, self.daily_bookings_per_bucket[sid] / daily_max)
+
+        self.acc_bookings_per_bucket_days += 1
+        for sid in range(self.n_stages):
+            self.acc_bookings_per_bucket[sid] += self.daily_bookings_per_bucket[sid]
+
+        if self.acc_bookings_per_bucket_days >= 7:
+            for sid in range(self.n_stages):
+                self.acc_bookings_per_bucket[sid] *= 0.7
+            self.acc_bookings_per_bucket_days = 0
 
         done = bool(done or self.day >= self.config.days_per_episode)
 

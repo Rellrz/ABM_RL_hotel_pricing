@@ -75,24 +75,24 @@ class Experiment2Config:
     # -----------------------------
     # PPO参数
     # -----------------------------
-    ppo_learning_rate: float = 3e-4
-    ppo_n_steps: int | None = None
+    ppo_learning_rate: float = 1e-4
+    ppo_n_steps: int | None = 256
     ppo_batch_size: int = 64
     ppo_gamma: float = 0.995
     ppo_gae_lambda: float = 0.98
-    ppo_ent_coef: float = 0.04
+    ppo_ent_coef: float = 0.005
     ppo_clip_range: float = 0.2
     ppo_norm_obs: bool = True
-    ppo_norm_reward: bool = True
+    ppo_norm_reward: bool = False
     ppo_clip_obs: float = 10.0
     ppo_clip_reward: float = 10.0
-    ppo_reward_mode: str = "scaled_raw_daily"
+    ppo_reward_mode: str = "mixed"
     ppo_reward_scale: float = 1e4
     ppo_shaped_reward_weight: float = 0.5
     ppo_net_arch: tuple = (256, 256)
     ppo_use_sde: bool = False
-    ppo_device: str = "mps"  # 可选: "cpu" / "mps" / "cuda" / "auto"
-    ppo_log_std_init: float = -0.2  # std≈0.82, 让初期在[-1,1]动作空间里充分探索
+    ppo_device: str = "mps"
+    ppo_log_std_init: float = -1.0
 
     # -----------------------------
     # CEM参数（复用项目配置）
@@ -155,7 +155,7 @@ class Experiment2Config:
     @property
     def mode_profile(self) -> Dict[str, int]:
         profiles = {
-            "debug": {"n_seeds": 1, "train_episodes": 100},
+            "debug": {"n_seeds": 1, "train_episodes": 1000},
             "medium": {"n_seeds": 10, "train_episodes": 600},
             "full": {"n_seeds": 30, "train_episodes": 600},
         }
