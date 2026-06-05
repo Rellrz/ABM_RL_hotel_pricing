@@ -16,7 +16,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from configs.experiment2 import Experiment2Config
 from src.evaluation.experiment_stats import build_performance_table, significance_tests
 from src.plot.experiment2_plotter import plot_learning_curves, plot_post_eval_bar
-from src.training.cem_ablation_runner import run_cem_family
+from src.training.bo_baseline import run_bo
+from src.training.cem_multivariate_baseline import run_multivariate_cem
+from src.training.cem_independent_baseline import run_independent_cem
 from src.training.emsrb_baseline import run_emsrb
 from src.training.ppo_baseline import run_ppo
 from src.training.qlearning_baseline import run_qlearning
@@ -28,8 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-jobs", type=int, default=None)
     parser.add_argument("--skip-ppo", action="store_true")
     parser.add_argument("--skip-qlearning", action="store_true")
-    parser.add_argument("--skip-cem", action="store_true")
+    parser.add_argument("--skip-cem", action="store_true", help="同时跳过 Multivariate CEM 和 Independent CEM")
+    parser.add_argument("--skip-cem-mv", action="store_true", help="跳过 Multivariate CEM")
+    parser.add_argument("--skip-cem-ind", action="store_true", help="跳过 Independent CEM")
     parser.add_argument("--skip-emsrb", action="store_true")
+    parser.add_argument("--skip-bo", action="store_true")
     parser.add_argument("--ppo-reward-mode", type=str, default=None, choices=["scaled_raw_daily", "raw_daily", "shaped_bucket", "mixed"])
     parser.add_argument("--ppo-reward-scale", type=float, default=None)
     parser.add_argument("--ppo-shaped-reward-weight", type=float, default=None)
@@ -48,7 +53,10 @@ def run_experiment2(
     skip_ppo: bool = False,
     skip_qlearning: bool = False,
     skip_cem: bool = False,
+    skip_cem_mv: bool = False,
+    skip_cem_ind: bool = False,
     skip_emsrb: bool = False,
+    skip_bo: bool = False,
 ) -> dict:
     config.ensure_dirs()
     training_records = []
@@ -59,8 +67,18 @@ def run_experiment2(
         training_records.extend(rec_train)
         eval_records.extend(rec_eval)
 
-    if not skip_cem:
-        rec_train, rec_eval = run_cem_family(config, historical_data)
+    if not skip_bo:
+        rec_train, rec_eval = run_bo(config, historical_data)
+        training_records.extend(rec_train)
+        eval_records.extend(rec_eval)
+
+    if not skip_cem and not skip_cem_mv:
+        rec_train, rec_eval = run_multivariate_cem(config, historical_data)
+        training_records.extend(rec_train)
+        eval_records.extend(rec_eval)
+
+    if not skip_cem and not skip_cem_ind:
+        rec_train, rec_eval = run_independent_cem(config, historical_data)
         training_records.extend(rec_train)
         eval_records.extend(rec_eval)
 
@@ -138,7 +156,10 @@ def main() -> None:
         skip_ppo=bool(args.skip_ppo),
         skip_qlearning=bool(args.skip_qlearning),
         skip_cem=bool(args.skip_cem),
+        skip_cem_mv=bool(args.skip_cem_mv),
+        skip_cem_ind=bool(args.skip_cem_ind),
         skip_emsrb=bool(args.skip_emsrb),
+        skip_bo=bool(args.skip_bo),
     )
     print(f"实验二完成，结果输出目录: {summary['outputs_dir']}")
 

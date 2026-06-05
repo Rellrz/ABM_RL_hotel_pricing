@@ -105,6 +105,14 @@ class Experiment2Config:
     cem_memory_size: int = int(RL_CONFIG.cem_memory_size)
 
     # -----------------------------
+    # Bayesian Optimization 参数
+    # -----------------------------
+    bo_n_calls: int = 200
+    bo_n_initial_points: int = 20
+    bo_acq_func: str = "EI"
+    bo_n_eval_episodes_per_point: int = 1
+
+    # -----------------------------
     # 路径
     # -----------------------------
     run_timestamp: str = ""
@@ -155,7 +163,7 @@ class Experiment2Config:
     @property
     def mode_profile(self) -> Dict[str, int]:
         profiles = {
-            "debug": {"n_seeds": 1, "train_episodes": 1000},
+            "debug": {"n_seeds": 1, "train_episodes": 200},
             "medium": {"n_seeds": 10, "train_episodes": 600},
             "full": {"n_seeds": 30, "train_episodes": 600},
         }
