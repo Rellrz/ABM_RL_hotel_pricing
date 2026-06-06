@@ -67,6 +67,13 @@ def plot_post_eval_bar(
     plt.xticks(x, agg["Algorithm"].values, rotation=15, ha="right")
     plt.ylabel(ylabel)
     plt.xlabel("Algorithm")
+
+    # Y 轴自适应数据范围，不从 0 开始
+    y_min = (agg["MeanMetric"] - agg["ErrorBar95CI"]).min()
+    y_max = (agg["MeanMetric"] + agg["ErrorBar95CI"]).max()
+    y_margin = (y_max - y_min) * 0.1
+    plt.ylim(y_min - y_margin, y_max + y_margin)
+
     plt.tight_layout()
     plt.savefig(output_path, dpi=300)
     plt.close()
