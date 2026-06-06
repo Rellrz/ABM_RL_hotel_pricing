@@ -195,10 +195,10 @@ def _build_emsrb_profile(config: Experiment2Config, historical_data: pd.DataFram
         protection[j] = float(np.clip(y / max(config.initial_inventory, 1), 0.0, 0.98))
 
     stage_price_factor: List[float] = []
-    denom = float(max(n_stages - 1, 1))
     for sid in range(n_stages):
-        near_term_premium = 1.0 - float(sid) / denom
-        fac = 0.92 + 0.28 * protection[sid] + 0.22 * near_term_premium
+        # 直接用历史 stage-ADR 相对全局 ADR 的比值作为价格因子
+        # 比硬编码系数更有理论依据：需求强的阶段自然定高价
+        fac = fares[sid] / max(global_adr, 1e-6)
         stage_price_factor.append(float(np.clip(fac, 0.80, 1.35)))
 
     return EMSRbProfile(
@@ -220,12 +220,9 @@ def _build_stage_policy_fn(config: Experiment2Config, profile: EMSRbProfile):
             * profile.season_weekday_factor.get((season, weekday), 1.0)
             * profile.stage_price_factor[sid]
         )
-        on_share = float(profile.stage_online_share[sid])
-
-        # 固定渠道切分思想：在线占比越高，线上报价越保守，线下保持轻微溢价。
-        online_discount = 0.04 + 0.10 * on_share
-        pon = base * (1.0 - online_discount)
-        poff = base * (1.0 + 0.02 * (1.0 - on_share))
+        # 线上价格 = 基础价 × (1 - OTA佣金率)，线下无佣金定原价
+        pon = base * (1.0 - float(config.commission_rate))
+        poff = base
 
         pon = float(np.clip(pon, config.online_price_min, config.online_price_max))
         poff = float(np.clip(poff, config.offline_price_min, config.offline_price_max))
@@ -292,7 +289,7 @@ def _run_single_seed(
     for idx, rew in enumerate(eval_rewards, start=1):
         eval_records.append(
             {
-                "Algorithm": "EMSR-b",
+                "Algorithm": "EMSR-b Heuristic",
                 "Seed": seed,
                 "EvalEpisode": idx,
                 "EvalHotelRevenue": float(rew["EvalHotelRevenue"]),

@@ -131,9 +131,9 @@ class RLConfig:
     ota_noise_std: float = 0.05
     ota_seed: int = 42
     online_price_min: float = 50.0
-    online_price_max: float = 200.0
+    online_price_max: float = 150.0
     offline_price_min: float = 50.0
-    offline_price_max: float = 200.0
+    offline_price_max: float = 150.0
     game_training_mode: str = 'simultaneous'
 
     episodes: int = 250
