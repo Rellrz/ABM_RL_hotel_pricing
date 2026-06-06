@@ -21,6 +21,8 @@ from src.training.cem_multivariate_baseline import run_multivariate_cem
 from src.training.cem_independent_baseline import run_independent_cem
 from src.training.emsrb_baseline import run_emsrb
 from src.training.ga_baseline import run_ga
+from src.training.oracle_baseline import run_oracle
+from src.training.rs_baseline import run_rs
 from src.training.sa_baseline import run_sa
 from src.training.ppo_baseline import run_ppo
 from src.training.qlearning_baseline import run_qlearning
@@ -39,6 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-bo", action="store_true")
     parser.add_argument("--skip-ga", action="store_true")
     parser.add_argument("--skip-sa", action="store_true")
+    parser.add_argument("--skip-rs", action="store_true")
+    parser.add_argument("--skip-oracle", action="store_true")
     parser.add_argument("--ppo-reward-mode", type=str, default=None, choices=["scaled_raw_daily", "raw_daily", "shaped_bucket", "mixed"])
     parser.add_argument("--ppo-reward-scale", type=float, default=None)
     parser.add_argument("--ppo-shaped-reward-weight", type=float, default=None)
@@ -63,6 +67,8 @@ def run_experiment2(
     skip_bo: bool = False,
     skip_ga: bool = False,
     skip_sa: bool = False,
+    skip_rs: bool = False,
+    skip_oracle: bool = False,
 ) -> dict:
     config.ensure_dirs()
     training_records = []
@@ -70,6 +76,11 @@ def run_experiment2(
 
     if not skip_emsrb:
         rec_train, rec_eval = run_emsrb(config, historical_data)
+        training_records.extend(rec_train)
+        eval_records.extend(rec_eval)
+
+    if not skip_oracle:
+        rec_train, rec_eval = run_oracle(config, historical_data)
         training_records.extend(rec_train)
         eval_records.extend(rec_eval)
 
@@ -85,6 +96,11 @@ def run_experiment2(
 
     if not skip_sa:
         rec_train, rec_eval = run_sa(config, historical_data)
+        training_records.extend(rec_train)
+        eval_records.extend(rec_eval)
+
+    if not skip_rs:
+        rec_train, rec_eval = run_rs(config, historical_data)
         training_records.extend(rec_train)
         eval_records.extend(rec_eval)
 
@@ -178,6 +194,8 @@ def main() -> None:
         skip_bo=bool(args.skip_bo),
         skip_ga=bool(args.skip_ga),
         skip_sa=bool(args.skip_sa),
+        skip_rs=bool(args.skip_rs),
+        skip_oracle=bool(args.skip_oracle),
     )
     print(f"实验二完成，结果输出目录: {summary['outputs_dir']}")
 

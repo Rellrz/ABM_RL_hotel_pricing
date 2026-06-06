@@ -107,7 +107,7 @@ class Experiment2Config:
     # -----------------------------
     # Bayesian Optimization 参数
     # -----------------------------
-    bo_n_calls: int = 200
+    bo_n_calls: int = 1000
     bo_n_initial_points: int = 20
     bo_acq_func: str = "EI"
     bo_n_eval_episodes_per_point: int = 1
@@ -125,11 +125,16 @@ class Experiment2Config:
     # -----------------------------
     # Simulated Annealing 参数
     # -----------------------------
-    sa_maxfun: int = 2000
+    sa_maxfun: int = 1000
     sa_initial_temp: float = 5230.0
     sa_visit: float = 2.62
     sa_accept: float = -5.0
     sa_no_local_search: bool = True
+
+    # -----------------------------
+    # Random Search 参数
+    # -----------------------------
+    rs_n_iterations: int = 1000
 
     # -----------------------------
     # 路径
@@ -183,8 +188,8 @@ class Experiment2Config:
     def mode_profile(self) -> Dict[str, int]:
         profiles = {
             "debug": {"n_seeds": 1, "train_episodes": 200},
-            "medium": {"n_seeds": 10, "train_episodes": 600},
-            "full": {"n_seeds": 30, "train_episodes": 600},
+            "medium": {"n_seeds": 5, "train_episodes": 1000},
+            "full": {"n_seeds": 30, "train_episodes": 1000},
         }
         if self.run_mode not in profiles:
             raise ValueError(f"Unknown run_mode={self.run_mode}")
