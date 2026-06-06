@@ -21,6 +21,7 @@ from src.training.cem_multivariate_baseline import run_multivariate_cem
 from src.training.cem_independent_baseline import run_independent_cem
 from src.training.emsrb_baseline import run_emsrb
 from src.training.ga_baseline import run_ga
+from src.training.sa_baseline import run_sa
 from src.training.ppo_baseline import run_ppo
 from src.training.qlearning_baseline import run_qlearning
 
@@ -37,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-emsrb", action="store_true")
     parser.add_argument("--skip-bo", action="store_true")
     parser.add_argument("--skip-ga", action="store_true")
+    parser.add_argument("--skip-sa", action="store_true")
     parser.add_argument("--ppo-reward-mode", type=str, default=None, choices=["scaled_raw_daily", "raw_daily", "shaped_bucket", "mixed"])
     parser.add_argument("--ppo-reward-scale", type=float, default=None)
     parser.add_argument("--ppo-shaped-reward-weight", type=float, default=None)
@@ -60,6 +62,7 @@ def run_experiment2(
     skip_emsrb: bool = False,
     skip_bo: bool = False,
     skip_ga: bool = False,
+    skip_sa: bool = False,
 ) -> dict:
     config.ensure_dirs()
     training_records = []
@@ -77,6 +80,11 @@ def run_experiment2(
 
     if not skip_ga:
         rec_train, rec_eval = run_ga(config, historical_data)
+        training_records.extend(rec_train)
+        eval_records.extend(rec_eval)
+
+    if not skip_sa:
+        rec_train, rec_eval = run_sa(config, historical_data)
         training_records.extend(rec_train)
         eval_records.extend(rec_eval)
 
@@ -169,6 +177,7 @@ def main() -> None:
         skip_emsrb=bool(args.skip_emsrb),
         skip_bo=bool(args.skip_bo),
         skip_ga=bool(args.skip_ga),
+        skip_sa=bool(args.skip_sa),
     )
     print(f"实验二完成，结果输出目录: {summary['outputs_dir']}")
 
