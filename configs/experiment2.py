@@ -113,6 +113,25 @@ class Experiment2Config:
     bo_n_eval_episodes_per_point: int = 1
 
     # -----------------------------
+    # Genetic Algorithm 参数
+    # -----------------------------
+    ga_pop_size: int = 40
+    ga_n_generations: int = 25
+    ga_tournament_pressure: int = 3
+    ga_crossover_prob: float = 0.9
+    ga_crossover_eta: float = 15.0
+    ga_mutation_eta: float = 20.0
+
+    # -----------------------------
+    # Simulated Annealing 参数
+    # -----------------------------
+    sa_maxfun: int = 2000
+    sa_initial_temp: float = 5230.0
+    sa_visit: float = 2.62
+    sa_accept: float = -5.0
+    sa_no_local_search: bool = True
+
+    # -----------------------------
     # 路径
     # -----------------------------
     run_timestamp: str = ""
