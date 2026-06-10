@@ -9,7 +9,7 @@ import numpy as np
 from tqdm import tqdm
 
 from src.agent.qlearning_agent import QLearningAgent
-from src.utils.common import state_to_144
+from src.utils.common import build_cem_flat_state
 from configs.experiment2 import Experiment2Config
 from src.environment.bucket_pricing_simulator import BucketPricingSimulator
 from src.evaluation.policy_evaluator import evaluate_policy
@@ -56,7 +56,7 @@ def _run_single_seed(
     init_actions = []
     for sid in range(sim.n_stages):
         st0 = sim.get_state_by_stage(sid)
-        s0 = state_to_144(st0, sid)
+        s0 = build_cem_flat_state(st0, sid)
         a0_idx = agent.select_action(s0, deterministic=False)
         a0 = config.q_action_grid[a0_idx]
         init_actions.append((float(a0[0]), float(a0[1])))
@@ -79,7 +79,7 @@ def _run_single_seed(
             init_actions = []
             for sid in range(sim.n_stages):
                 st0 = sim.get_state_by_stage(sid)
-                s0 = state_to_144(st0, sid)
+                s0 = build_cem_flat_state(st0, sid)
                 a0_idx = agent.select_action(s0, deterministic=False)
                 a0 = config.q_action_grid[a0_idx]
                 init_actions.append((float(a0[0]), float(a0[1])))
@@ -89,7 +89,7 @@ def _run_single_seed(
         stage_actions = []
         for sid in range(sim.n_stages):
             st = sim.get_state_by_stage(sid)
-            s_idx = state_to_144(st, sid)
+            s_idx = build_cem_flat_state(st, sid)
             a_idx = agent.select_action(s_idx, deterministic=False)
             a = config.q_action_grid[a_idx]
             stage_actions.append((float(a[0]), float(a[1])))
@@ -99,8 +99,8 @@ def _run_single_seed(
         episode_ota_profit += float(out.reward_ota)
         update_events = out.info.get("update_events", [])
         for ev in update_events:
-            s = state_to_144(ev.state, int(ev.state.get("stage_id", 0)))
-            s_next = state_to_144(ev.next_state, int(ev.next_state.get("stage_id", 0)))
+            s = build_cem_flat_state(ev.state, int(ev.state.get("stage_id", 0)))
+            s_next = build_cem_flat_state(ev.next_state, int(ev.next_state.get("stage_id", 0)))
             a_pair = np.asarray(ev.action_pair, dtype=np.float64)
             # 将连续动作映射回离散动作网格索引
             dist = np.sum((config.q_action_grid - a_pair.reshape(1, 2)) ** 2, axis=1)
@@ -132,7 +132,7 @@ def _run_single_seed(
     pbar.close()
 
     def stage_policy_fn(stage_id: int, st: dict):
-        s_idx = state_to_144(st, stage_id)
+        s_idx = build_cem_flat_state(st, stage_id)
         a_idx = agent.select_action(s_idx, deterministic=True)
         a = config.q_action_grid[a_idx]
         return float(a[0]), float(a[1])

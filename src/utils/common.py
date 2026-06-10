@@ -198,6 +198,12 @@ def build_cem_state_key(
     )
 
 
+def build_cem_flat_state(state: Dict, stage_id: int | None = None) -> int:
+    """build_cem_state_key → 扁平整数索引（0~1199），供 Q-learning 等表格方法复用 CEM 状态划分。"""
+    stage, season, weekday, near_bin, far_bin = build_cem_state_key(state, stage_id)
+    return (((stage * 3 + season) * 2 + weekday) * 5 + near_bin) * 5 + far_bin
+
+
 def compute_reward_shaping(
     state: Dict | None,
     base_reward_hotel: float,

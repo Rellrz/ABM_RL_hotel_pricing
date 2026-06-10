@@ -84,6 +84,16 @@ def run_experiment2(
         training_records.extend(rec_train)
         eval_records.extend(rec_eval)
 
+    if not skip_cem and not skip_cem_mv:
+        rec_train, rec_eval = run_multivariate_cem(config, historical_data)
+        training_records.extend(rec_train)
+        eval_records.extend(rec_eval)
+    
+    if not skip_cem and not skip_cem_ind:
+        rec_train, rec_eval = run_independent_cem(config, historical_data)
+        training_records.extend(rec_train)
+        eval_records.extend(rec_eval)
+    
     if not skip_bo:
         rec_train, rec_eval = run_bo(config, historical_data)
         training_records.extend(rec_train)
@@ -101,16 +111,6 @@ def run_experiment2(
 
     if not skip_rs:
         rec_train, rec_eval = run_rs(config, historical_data)
-        training_records.extend(rec_train)
-        eval_records.extend(rec_eval)
-
-    if not skip_cem and not skip_cem_mv:
-        rec_train, rec_eval = run_multivariate_cem(config, historical_data)
-        training_records.extend(rec_train)
-        eval_records.extend(rec_eval)
-
-    if not skip_cem and not skip_cem_ind:
-        rec_train, rec_eval = run_independent_cem(config, historical_data)
         training_records.extend(rec_train)
         eval_records.extend(rec_eval)
 

@@ -107,7 +107,7 @@ class Experiment2Config:
     # -----------------------------
     # Bayesian Optimization 参数
     # -----------------------------
-    bo_n_calls: int = 1000
+    bo_n_calls: int = 500
     bo_n_initial_points: int = 20
     bo_acq_func: str = "EI"
     bo_n_eval_episodes_per_point: int = 1
@@ -187,7 +187,7 @@ class Experiment2Config:
     @property
     def mode_profile(self) -> Dict[str, int]:
         profiles = {
-            "debug": {"n_seeds": 1, "train_episodes": 200},
+            "debug": {"n_seeds": 1, "train_episodes": 300},
             "medium": {"n_seeds": 5, "train_episodes": 1000},
             "full": {"n_seeds": 30, "train_episodes": 1000},
         }
@@ -220,8 +220,8 @@ class Experiment2Config:
 
     @property
     def q_n_states(self) -> int:
-        # 5*3*2*8 = 240
-        return 240
+        # 复用 CEM 状态空间: stage(8) × season(3) × weekday(2) × near_inv(5) × far_inv(5) = 1200
+        return 1200
 
     @property
     def q_action_grid(self) -> np.ndarray:
